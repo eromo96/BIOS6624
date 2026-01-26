@@ -5,7 +5,8 @@
 # Session Data files
 .RData
 .RDataTmp
-
+.csv
+.xlsx
 # User-specific files
 .Ruserdata
 
