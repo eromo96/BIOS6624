@@ -1,6 +1,7 @@
 #data cleaning for project0 data
 library(tidyverse)
-
+library(lme4)
+library(lmerTest)
 #read in data
 p0_data <- read_csv("./Project0/Data/Project0_Clean_v2.csv")
 
@@ -46,6 +47,8 @@ p0_data <- p0_data %>%
     booklet_interval = as.numeric(booklet_tm - wake_tm)/3600
   )
 
+##########--------QUESTION 2------#############
+
 #create truth columns of +/- 7.5 and 15 mins to check adherence
 p0_data <- p0_data %>%
   mutate(
@@ -77,4 +80,147 @@ adherence <- p0_data %>%
     within_15_book = mean(adherence_book15, na.rm = TRUE)
   )
 
+#transform adherence table to long so that it's ready to print
+adherence_table <- adherence %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "name",
+    values_to = "prop"
+  ) %>%
+  mutate(
+    Method = if_else(grepl("_mems$", name), "MEMS", "Booklet"),
+    Window = case_when(
+      grepl("^within_7_5_", name) ~ "±7.5 minutes",
+      grepl("^within_15_",  name) ~ "±15 minutes"
+    )
+  ) %>%
+  select(Window, Method, prop) %>%
+  pivot_wider(names_from = Method, values_from = prop)
+#convert to percents
+adherence_table <- adherence_table %>%
+  mutate(
+    MEMS = scales::percent(MEMS, accuracy = 0.1),
+    Booklet = scales::percent(Booklet, accuracy = 0.1)
+  )
 
+
+##########--------QUESTION 1------#############
+
+#create scatterplot of mems vs booklet interval times
+ggplot(p0_data, aes(x= booklet_interval, y= mems_interval)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0) +
+  labs(x = "Booklet Time from Wake", y= "MEMs Time from Wake")
+
+#run linear mixed effects model of booklet time vs mems time with random intercept
+q1_mod1 <- lmer(mems_interval ~ booklet_interval + (1|SubjectID), data = p0_data)
+
+#output of model; p-value for intercept tests whether its equal to 0 or not(of interest)
+summary(q1_mod1)
+confint(q1_mod1)
+
+#test whether beta1 is equal to 1 or not (of interest)
+contest(q1_mod1, L = c(0, 1), rhs = 1)
+
+#now fit a model of just diff between MEMs and Booklet
+q1_mod2 <- lmer(mems_interval - booklet_interval ~ 1 + (1|SubjectID), data = p0_data)
+
+summary(q1_mod2)
+confint(q1_mod2)
+
+
+
+##########--------QUESTION 3------#############
+
+#check to see subjects with DHEA values equal to 5.205
+p0_data %>% filter(dhea == 5.205)
+
+#subject 3037 has several DHEA measures at detection limit so remove from Q3 analysis
+q3_data <- p0_data %>%
+  filter(SubjectID != 3037)
+
+#cortisol data filtering out samples with cortisol values over 80 due to lab error
+cortisol_data <- q3_data %>%
+  filter(cortisol <=80)
+
+#dhea data filtering out samples with dhea == 5.205
+dhea_data <- q3_data %>%
+  filter(dhea < 5.205)
+
+#check to see distribution of cortisol
+hist(cortisol_data$cortisol)
+#log transform cortisol and check distribution
+hist(log1p(cortisol_data$cortisol))
+
+#create piecewise at 30 mins for mems time
+cortisol_data <- cortisol_data %>%
+  mutate(
+    mems_step = pmax(0, mems_interval-0.5)
+  )
+
+#distribution of cortisol is not normal whereas log(x+1) is normal so use log transformed
+q3_cortmod1 <- lmer(log1p(cortisol) ~ mems_interval + mems_step + (1|SubjectID),
+                    data = cortisol_data)
+summary(q3_cortmod1)
+
+#cortisol prediction grid
+cort_grid <- data.frame(
+  mems_interval = seq(0, 12, length = 200)
+)
+
+cort_grid$mems_step <- pmax(0, cort_grid$mems_interval - 0.5)
+
+cort_grid$pred <- predict(q3_cortmod1,
+                          newdata = cort_grid,
+                          re.form = NA)
+#plot of predicted over observed
+ggplot(cortisol_data,
+       aes(mems_interval, log1p(cortisol))) +
+  geom_point(alpha = 0.4) +
+  geom_line(data = cort_grid,
+            aes(mems_interval, pred),
+            linewidth = 1.2) +
+  labs(
+    x = "Time Since Wake (hours)",
+    y = "log(1 + Cortisol)",
+    title = "Predicted Cortisol Diurnal Curve"
+  )
+
+#check to see distribution of dhea
+hist(dhea_data$dhea)
+#log transform dhea and check distribution
+hist(log1p(dhea_data$dhea))
+
+#create piecewise at 30 mins for mems time
+dhea_data <- dhea_data %>%
+  mutate(
+    mems_step = pmax(0, mems_interval-0.5)
+  )
+
+#distribution of dhea is not normal whereas log(x+1) is a bit better
+q3_dheamod1 <- lmer(log1p(dhea) ~ mems_interval + mems_step + (1|SubjectID),
+                    data = dhea_data)
+summary(q3_dheamod1)
+
+#dhea predicted grid
+dhea_grid <- data.frame(
+  mems_interval = seq(0, 12, length = 200)
+)
+
+dhea_grid$mems_step <- pmax(0, dhea_grid$mems_interval - 0.5)
+
+dhea_grid$pred <- predict(q3_dheamod1,
+                          newdata = dhea_grid,
+                          re.form = NA)
+#plot of predicted over observed
+ggplot(dhea_data,
+       aes(mems_interval, log1p(dhea))) +
+  geom_point(alpha = 0.4) +
+  geom_line(data = dhea_grid,
+            aes(mems_interval, pred),
+            linewidth = 1.2) +
+  labs(
+    x = "Time Since Wake (hours)",
+    y = "log(1 + DHEA)",
+    title = "Predicted DHEA Diurnal Curve"
+  )
