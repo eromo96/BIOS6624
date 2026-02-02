@@ -1,0 +1,62 @@
+---
+title: "Agreement and Adherence of Salivary Sampling Times and Diurnal Hormone Patterns"
+author: "Eduardo Romo"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    number_sections: false
+    toc: false
+fontsize: 12pt
+geometry: margin=1in
+header-includes:
+  - \usepackage{setspace}
+  - \doublespacing
+  - \usepackage{float}
+  - \floatplacement{figure}{H}
+  - \floatplacement{table}{H}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 6.5, fig.height = 4.5
+)
+library(kableExtra)
+library(lmerTest)
+library(scales)
+library(lubridate)
+library(tidyverse)
+```
+
+## Introduction
+Cortisol and DHEA exhibit diurnal patterns that are commonly measured using repeated saliva sampling. Accurate measurement of the cortisol awakening response and subsequent daily decline depends on participants adhering to strict sampling time protocols. To improve the accuracy and feasibility of home-based saliva collection, investigators developed a filter-paper-based saliva collection booklet stored in a bottle with an electronic monitoring cap that records sample collection time.
+
+The dataset for this analysis includes saliva cortisol and DHEA measurements from 31 healthy subjects who collected four samples per day over three days. Sample collection times were recorded both by subjects in a booklet and automatically by the electronic cap (MEMs). The primary goals of this analysis were to evaluate agreement between sampling time recording methods, assess adherence to the sampling protocol, and characterize changes in cortisol and DHEA concentrations over time. These research questions were translated into statistical hypotheses evaluating agreement between timing methods using mixed effects regression, calculating adherence proportions to protocol specified collection times, and modeling hormone concentration changes over time using piecewise mixed effects models. 
+
+
+## Methods
+All of the data processing, cleaning, and analysis were conducted in R version 4.4.1 using R studio. 
+
+Following consultation with the investigator, several variables were excluded due to concerns regarding potential measurement or calculation error. Booklet and MEMs time intervals variables provided in the raw dataset were excluded  because of uncertainty regarding how these values were calculated. Instead, time since waking was calculated manually using recorded time of day values. Cortisol and DHEA concentrations recorded in nmol/L units were used for all analyses, rather than values reported in ug/dl or pg/dl. 
+
+For research question 3 analysis, additional data filtering steps were applied. Subject 3037 was excluded due to several DHEA measures at the assay detection limit (5.205 nmol/L), suggesting potential underlying health conditions. For DHEA specific analyses, observations equal to the detection limit were excluded. For cortisol specific analysis, values over 80 nmol/L excluded, as these values were considered likely laboratory measurement errors. 
+
+Time since waking was calculated separately for booklet and MEMs sampling methods by subtracting sleep diary reported wake time from the recorded time of sample collection. These differences were converted to hours and used as the primary time variable for analysis.
+
+To evaluate adherence to protocol specific sampling times, target collection times were defined as 0.5 hours after waking for sample 2 and 10 hours after waking for sample 4. For each method, deviation from the target sampling time was calculated as teh absolute difference between observed time since waking and the target time. Binary adherence indicators were then created for each method indicating whether samples were collected within ± 7.5 minutes and ±15 minutes of the target sampling time.
+
+For research question 3, a piecewise time variable was created to allow separate estimation of hormone concentration changes before and after 30 minutes post waking. This variable was defined as the positive difference between time since waking and 0.5 hours, and zero otherwise. This definition allowed estimation of separate slopes for hormone change from waking to 30 minutes post waking and from 30 minutes through the remainder of the day.
+
+Distributions of cortisol and DHEA concentrations were evaluated using histograms and were found to be right-skewed. The skewness of these hormone levels was further assessed using boxplots which demonstrated several outliers across samples 1 through 4. To improve normality and stabilize variance, hormone concentrations were transformed using a log(1+x) transformation prior to statistical modeling. 
+
+
+
+
+
+
+
+
+
+Agreement between booklet and electronic sampling times was evaluated using a scatterplot and a linear mixed effects model with random intercepts for subjects. Statistical hypotheses tested whether the intercept differed from zero and whether the slope differed from one. Good and adequate adherence were defined as sample collection within ±7.5 minutes and ±15 minutes, respectively, of scheduled times. Adherence proportions were calculated separately for booklet and electronic cap recorded sampling times. Changes in cortisol and DHEA over time 
+

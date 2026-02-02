@@ -148,9 +148,14 @@ dhea_data <- q3_data %>%
   filter(dhea < 5.205)
 
 #check to see distribution of cortisol
-hist(cortisol_data$cortisol)
+hist(cortisol_data$cortisol) #found cortisol to be heavily right skewed and not normal
 #log transform cortisol and check distribution
-hist(log1p(cortisol_data$cortisol))
+hist(log1p(cortisol_data$cortisol)) #appears more normally distributed
+
+#boxplot to further visualize outliers
+ggplot(cortisol_data, aes(x = factor(sample), y = cortisol)) +
+  geom_boxplot() +
+  labs(x="Sample (1–4)", y="Cortisol (nmol/L)", title="Cortisol by sample")
 
 #create piecewise at 30 mins for mems time
 cortisol_data <- cortisol_data %>%
@@ -158,7 +163,7 @@ cortisol_data <- cortisol_data %>%
     mems_step = pmax(0, mems_interval-0.5)
   )
 
-#distribution of cortisol is not normal whereas log(x+1) is normal so use log transformed
+#distribution of cortisol is not normal whereas log(x+1) is approx normal so use log transformed
 q3_cortmod1 <- lmer(log1p(cortisol) ~ mems_interval + mems_step + (1|SubjectID),
                     data = cortisol_data)
 summary(q3_cortmod1)
@@ -186,10 +191,16 @@ ggplot(cortisol_data,
     title = "Predicted Cortisol Diurnal Curve"
   )
 
+
 #check to see distribution of dhea
-hist(dhea_data$dhea)
+hist(dhea_data$dhea) #not normal and heavily right skewed
 #log transform dhea and check distribution
-hist(log1p(dhea_data$dhea))
+hist(log1p(dhea_data$dhea)) #still right skewed but a bit more normal
+
+#boxplot to visualize outliers
+ggplot(dhea_data, aes(x = factor(sample), y = dhea)) +
+  geom_boxplot() +
+  labs(x="Sample (1–4)", y="DHEA (nmol/L)", title="DHEA by sample")
 
 #create piecewise at 30 mins for mems time
 dhea_data <- dhea_data %>%
