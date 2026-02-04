@@ -51,3 +51,6 @@ rsconnect/
 
 #junk file
 *.DS_Store
+
+#images
+*.jpef

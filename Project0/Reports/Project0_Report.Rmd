@@ -15,6 +15,8 @@ header-includes:
   - \usepackage{float}
   - \floatplacement{figure}{H}
   - \floatplacement{table}{H}
+  - \setlength{\parindent}{2em}
+  - \setlength{\parskip}{0pt}
 ---
 
 ```{r setup, include=FALSE}
@@ -22,22 +24,59 @@ knitr::opts_chunk$set(
   echo = FALSE, message = FALSE, warning = FALSE,
   fig.align = "center", fig.width = 6.5, fig.height = 4.5
 )
+library(emmeans)
+library(patchwork)
 library(kableExtra)
 library(lmerTest)
 library(scales)
 library(lubridate)
 library(tidyverse)
+
+#read in data
+p0_data <- read_csv("../Data/Project0_Clean_v2.csv")
+
+#remove columns that wont be used for data analysis
+p0_data <- p0_data %>%
+  select(-`Booklet: Sample interval`, -`Booklet: Sample interval Decimal Time (mins)`, -`MEMs: Sample interval`,
+         -`MEMs: Sample interval Decimal Time (mins)`, -`Cortisol (ug/dl)`, -`DHEA (pg/dl)`)
+
+#convert date columns to appropriate date format
+p0_data <- p0_data %>%
+  mutate(
+    `Collection Date` = mdy(`Collection Date`)
+  ) %>%
+  rename(
+    date = `Collection Date`,
+    sample = `Collection Sample`,
+    wake_tm = `Sleep Diary reported wake time`,
+    booklet_tm = `Booket: Clock Time`,
+    mems_tm = `MEMs: Clock Time`,
+    cortisol = `Cortisol (nmol/L)`,
+    dhea = `DHEA (nmol/L)`,
+    day = DAYNUMB
+  )
+#manually calculate sample interval times for MEMs and Booklet 
+p0_data <- p0_data %>%
+  group_by(SubjectID, date) %>%
+  arrange(sample, .by_group = TRUE) %>%
+  fill(wake_tm, .direction = "down") %>%
+  ungroup() %>%
+  mutate(
+    mems_interval = as.numeric(mems_tm - wake_tm)/3600,
+    booklet_interval = as.numeric(booklet_tm - wake_tm)/3600
+  )
+
+
 ```
 
-## Introduction
+
+# Introduction
 Cortisol and DHEA exhibit diurnal patterns that are commonly measured using repeated saliva sampling. Accurate measurement of the cortisol awakening response and subsequent daily decline depends on participants adhering to strict sampling time protocols. To improve the accuracy and feasibility of home-based saliva collection, investigators developed a filter-paper-based saliva collection booklet stored in a bottle with an electronic monitoring cap that records sample collection time.
 
 The dataset for this analysis includes saliva cortisol and DHEA measurements from 31 healthy subjects who collected four samples per day over three days. Sample collection times were recorded both by subjects in a booklet and automatically by the electronic cap (MEMs). The primary goals of this analysis were to evaluate agreement between sampling time recording methods, assess adherence to the sampling protocol, and characterize changes in cortisol and DHEA concentrations over time. These research questions were translated into statistical hypotheses evaluating agreement between timing methods using mixed effects regression, calculating adherence proportions to protocol specified collection times, and modeling hormone concentration changes over time using piecewise mixed effects models. 
 
 
-## Methods
-All of the data processing, cleaning, and analysis were conducted in R version 4.4.1 using R studio. 
-
+# Methods
 Following consultation with the investigator, several variables were excluded due to concerns regarding potential measurement or calculation error. Booklet and MEMs time intervals variables provided in the raw dataset were excluded  because of uncertainty regarding how these values were calculated. Instead, time since waking was calculated manually using recorded time of day values. Cortisol and DHEA concentrations recorded in nmol/L units were used for all analyses, rather than values reported in ug/dl or pg/dl. 
 
 For research question 3 analysis, additional data filtering steps were applied. Subject 3037 was excluded due to several DHEA measures at the assay detection limit (5.205 nmol/L), suggesting potential underlying health conditions. For DHEA specific analyses, observations equal to the detection limit were excluded. For cortisol specific analysis, values over 80 nmol/L excluded, as these values were considered likely laboratory measurement errors. 
@@ -48,15 +87,550 @@ To evaluate adherence to protocol specific sampling times, target collection tim
 
 For research question 3, a piecewise time variable was created to allow separate estimation of hormone concentration changes before and after 30 minutes post waking. This variable was defined as the positive difference between time since waking and 0.5 hours, and zero otherwise. This definition allowed estimation of separate slopes for hormone change from waking to 30 minutes post waking and from 30 minutes through the remainder of the day.
 
-Distributions of cortisol and DHEA concentrations were evaluated using histograms and were found to be right-skewed. The skewness of these hormone levels was further assessed using boxplots which demonstrated several outliers across samples 1 through 4. To improve normality and stabilize variance, hormone concentrations were transformed using a log(1+x) transformation prior to statistical modeling. 
+Hormone distributions were right-skewed with several extreme observations; therefore, log transformation was applied prior to modeling.
+
+Agreement between booklet-recorded and electronically recorded sampling times was evaluated using scatterplots and linear mixed effects regression models with random intercepts for subjects to account for repeated measures within individuals. In these models, MEMs time since waking was modeled as the outcome and booklet time since waking was modeled as the predictor. Statistical hypotheses tested using a t-test whether the model intercept differed from zero, indicating constant bias between measurement methods, and whether the slope differed from one, indicating proportional bias between methods.
+
+Adherence to protocol specified sampling times was evaluated by calculating the proportion of samples collected within ± 7.5 minutes and ±15 minutes of the target sampling times. Adherence proportions were calculated separately for booklet- and MEMs-recorded sampling times.
+
+Changes in cortisol and DHEA concentrations over time were evaluated using linear mixed effects regression models with random intercepts for subjects. Time since waking was measured using booklet recorded sampling times. Booklet times were selected for hormone modeling ebcause adherence analyses demonstrated higher adherence to protocol specified sampling times compared with MEMs recorded times. In addition, booklet times had a lower proportion of missing values than MEMs times. Time since waking was modeled using a piecewise linear specification with a knot at 0.5 hours (30 minutes) after waking to allow separate estimation of hormone concentration changes during the awakening response period and the post-awakening decline period. Hormone concentrations were modeled on the log scale to improve normality and stabilize variance.
+
+All statistical tests were two-sided and statistical significance was assessed at the \alpha=0.05 level. Analyses were conducted using R version 4.4.1.
+
+
+# Results
+
+An initial descriptive analysis was performed to characterize the structure of the dataset and evaluate overall trends in sampling times and hormone concentrations.Table 1 summarizes sampling time differences between MEMs and booklet recorded times, as well as cortisol and DHEA concentrations by sample collection time. 
+
+The mean difference between MEMs and booklet sampling times was approximately 0.1 hours across most samples, with a larger mean difference observed at Sample 2 (30 minutes after waking), where the mean difference was 0.27 hours. This suggests greater disagreement between sampling methods during the 30 minute post waking sampling period. 
+
+Mean cortisol concentrations followed the pattern anticipated by the investigator, with the highest average concentration observed at Sample 2 (8.94 nmol/L) followed by decreasing concentrations across later sampling times. 
+
+
+```{r, echo=FALSE}
+# ---- Prep analysis dataset ----
+table1_data <- p0_data %>%
+  mutate(
+    Sample = factor(sample,
+                    levels = 1:4,
+                    labels = c("Sample 1\n(Wake)",
+                               "Sample 2\n(+30 min)",
+                               "Sample 3\n(Lunch)",
+                               "Sample 4\n(+10 hr)")
+    ),
+    time_diff = mems_interval - booklet_interval
+  )
+
+# ---- Helper formatters ----
+fmt_mean_sd <- function(x, digits = 2){
+  if(all(is.na(x))) return(NA_character_)
+  sprintf(paste0("%.",digits,"f (%.",digits,"f)"),
+          mean(x, na.rm = TRUE),
+          sd(x, na.rm = TRUE))
+}
+
+fmt_median_iqr <- function(x, digits = 2){
+  if(all(is.na(x))) return(NA_character_)
+  q <- quantile(x, c(.25,.5,.75), na.rm = TRUE)
+  sprintf(paste0("%.",digits,"f [%.",digits,"f, %.",digits,"f]"),
+          q[2], q[1], q[3])
+}
+
+fmt_missing <- function(x){
+  n_miss <- sum(is.na(x))
+  p_miss <- mean(is.na(x)) * 100
+  sprintf("%d (%.1f%%)", n_miss, p_miss)
+}
+
+# ---- By-sample summaries (LONG) ----
+table1_long <- table1_data %>%
+  group_by(Sample) %>%
+  summarise(
+    N = as.character(n()),
+    
+    diff_mean_sd = fmt_mean_sd(time_diff),
+    diff_med_iqr = fmt_median_iqr(time_diff),
+    diff_miss    = fmt_missing(time_diff),
+    
+    cort_mean_sd = fmt_mean_sd(cortisol),
+    cort_med_iqr = fmt_median_iqr(cortisol),
+    cort_miss    = fmt_missing(cortisol),
+    
+    dhea_mean_sd = fmt_mean_sd(dhea),
+    dhea_med_iqr = fmt_median_iqr(dhea),
+    dhea_miss    = fmt_missing(dhea),
+    
+    .groups = "drop"
+  ) %>%
+  pivot_longer(-Sample, names_to = "Statistic", values_to = "Value")
+
+# ---- Overall summaries (LONG) ----
+overall_long <- table1_data %>%
+  summarise(
+    N = as.character(n()),
+    
+    diff_mean_sd = fmt_mean_sd(time_diff),
+    diff_med_iqr = fmt_median_iqr(time_diff),
+    diff_miss    = fmt_missing(time_diff),
+    
+    cort_mean_sd = fmt_mean_sd(cortisol),
+    cort_med_iqr = fmt_median_iqr(cortisol),
+    cort_miss    = fmt_missing(cortisol),
+    
+    dhea_mean_sd = fmt_mean_sd(dhea),
+    dhea_med_iqr = fmt_median_iqr(dhea),
+    dhea_miss    = fmt_missing(dhea)
+  ) %>%
+  pivot_longer(everything(), names_to = "Statistic", values_to = "Value") %>%
+  mutate(Sample = "Overall")
+
+# ---- Combine + order + relabel stats + flip to wide ----
+stat_order <- c(
+  "N",
+  "diff_mean_sd", "diff_med_iqr", "diff_miss",
+  "cort_mean_sd", "cort_med_iqr", "cort_miss",
+  "dhea_mean_sd", "dhea_med_iqr", "dhea_miss"
+)
+
+table1_final <- bind_rows(table1_long, overall_long) %>%
+  mutate(
+    stat_key = factor(Statistic, levels = stat_order),
+    Statistic = recode(Statistic,
+                       N = "N",
+                       
+                       diff_mean_sd = "Time diff (MEMS − Booklet), mean (SD) [hours]",
+                       diff_med_iqr = "Time diff (MEMS − Booklet), median [IQR] [hours]",
+                       diff_miss    = "Time diff missing, n (%)",
+                       
+                       cort_mean_sd = "Cortisol (nmol/L), mean (SD)",
+                       cort_med_iqr = "Cortisol (nmol/L), median [IQR]",
+                       cort_miss    = "Cortisol missing, n (%)",
+                       
+                       dhea_mean_sd = "DHEA (nmol/L), mean (SD)",
+                       dhea_med_iqr = "DHEA (nmol/L), median [IQR]",
+                       dhea_miss    = "DHEA missing, n (%)"
+    )
+  ) %>%
+  arrange(stat_key) %>%               
+  select(-stat_key) %>%              
+  pivot_wider(names_from = Sample, values_from = Value)
+
+# ---- Render to PDF using kableExtra ----
+kable(
+  table1_final,
+  format = "latex",
+  booktabs = TRUE,
+  align = "lccccc",
+  caption = "Descriptive statistics by sample collection time"
+) %>%
+  kable_styling(
+    latex_options = c("hold_position", "scale_down"),
+    font_size = 10
+  )
+```
+
+
+## Question 1
+Agreement between booklet recodred and MEMs recorded sampling times was evaluated using a scatterplot and a linear mixed effects model with random intercepts for subjects. The agreement scatterplot below shows observations clustere closely around the identity line (slope = 1, intercept = 0), indicating strong overall agreement between MEMs and booklet recorded sampling times. However, a slightly greater number of points appear above the identity line, suggesting that MEMs times tended to be slightly greater than booklet times for some observations. This visualization suggests the possibility of a minor systematic difference between measurement methods and supports the need for formal statistical modeling. 
+
+The estimated intercept from the mixed effects model was 0.17 hours (95% CI: 0.08, 0.26; p < 0.001), indicating a small but statistically significant (t-test) constant difference between MEMs and booklet sampling times. The estimated slope relating booklet recorded time since waking to MEMs recorded time since waking was 0.99 (95% CI: 0.98, 1.01). An F test evaluating whether the slope differed from one was not statistically significant (p = 0.20), suggesting no evidence of proportional bias between the two sampling methods over time.
 
 
 
+```{r, echo=FALSE, fig.cap = "Agreement Between MEMs and Booklet Sampling Times"}
+##########--------QUESTION 1------#############
+
+#run linear mixed effects model of booklet time vs mems time with random intercept
+q1_mod1 <- lmer(mems_interval ~ booklet_interval + (1|SubjectID), data = p0_data)
+
+#scatterplot of agreement between mems and booklet times
+ggplot(p0_data, aes(x= booklet_interval, y= mems_interval)) + 
+  geom_point() + 
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") + 
+  geom_abline(slope = fixef(q1_mod1)["booklet_interval"], intercept = fixef(q1_mod1)["(Intercept)"],
+              linewidth = 1, col = "blue") +
+  labs(x = "Booklet Time from Wake", y= "MEMs Time from Wake")
+```
 
 
+```{r, echo =FALSE}
+#create table of lmm for question 1
+#get fixed effects from model
+fixef_tab <- summary(q1_mod1)$coefficients %>%
+  as.data.frame() %>%
+  rownames_to_column("Term") %>%
+  select(
+    Term,
+    Estimate,
+    `Std. Error`,
+    `Pr(>|t|)`
+  )
+#95% ci
+ci_tab <- confint(q1_mod1) %>%
+  as.data.frame() %>%
+  rownames_to_column("Term") %>%
+  rename(
+    LL = `2.5 %`,
+    UL = `97.5 %`
+  ) %>%
+  filter(Term %in% fixef_tab$Term)
+#putting table together
+model_table <- fixef_tab %>%
+  left_join(ci_tab, by = "Term") %>%
+  mutate(
+    CI_95 = sprintf("[%.3f, %.3f]", LL, UL),
+    Estimate = round(Estimate, 3),
+    `Std. Error` = round(`Std. Error`, 3),
+    `Pr(>|t|)` = signif(`Pr(>|t|)`, 3)
+  ) %>%
+  select(
+    Term,
+    Estimate,
+    CI_95,
+    `Pr(>|t|)`
+  ) %>%
+  rename(
+    `95% CI` = CI_95,
+    `p-value` = `Pr(>|t|)`
+  )
+#extract hypothesis test of whether beta1 is equal to 1
+contest_res <- contest(q1_mod1, L = c(0, 1), rhs = 1)
+
+contest_table <- tibble(
+  Term = "Slope test: β1 = 1",
+  Estimate = NA,
+  `95% CI` = NA,
+  `p-value` = signif(contest_res$`Pr(>F)`[1], 3)
+)
+#final table
+final_table <- bind_rows(
+  model_table,
+  contest_table
+)
+#change row names so that they are appropriate for final report
+rownames(final_table) <- c("Intercept", "Booklet Interval", "Slope Test = 1")
+#use kbl to knit to pdf nicely (kbl is the best)
+final_table %>%
+  kbl(
+    caption = "Linear mixed model results for MEMS interval vs booklet interval",
+    align = "lccc",
+    booktabs = TRUE,
+    linesep = ""
+  ) %>%
+  kable_styling(
+    latex_options = c("hold_position"),
+    font_size = 10
+  )
+
+```
 
 
+## Question 2
+Adherence to protocol specified sampling time differed between measurement methods. Using a ±7.5 window, 41.8% of MEMs recorded samples and 62.9% of booklet recorded samples were within the target collection time. Using a ±15 minute window, 54.2% of MEMs samples and 73.7% of booklet samples met adherence criteria. Although booklet recorded times showed higher adherence, this may reflect rounding or reporting behavior related to self recorded times instead of true sampling time accuracy.
+
+```{r, echo=FALSE}
+##########--------QUESTION 2------#############
+
+#create truth columns of +/- 7.5 and 15 mins to check adherence
+p0_data <- p0_data %>%
+  mutate(
+    truth = case_when(
+      sample == 2 ~ .5,
+      sample == 4 ~ 10,
+      .default = NA
+    ),
+    deviation_mems = abs(mems_interval - truth),
+    deviation_book = abs(booklet_interval - truth)
+  )
+
+#check adherence
+p0_data <- p0_data %>%
+  mutate(
+    adherence_mems7_5 = if_else(deviation_mems <= 7.5/60, 1, 0),
+    adherence_book7_5 = if_else(deviation_book <= 7.5/60, 1, 0),
+    adherence_mems15 = if_else(deviation_mems <= 15/60, 1, 0),
+    adherence_book15 = if_else(deviation_book <= 15/60, 1, 0)
+  )
+
+#calc adherence proportions
+adherence <- p0_data %>%
+  filter(!is.na(truth)) %>%
+  summarise(
+    within_7_5_mems = mean(adherence_mems7_5, na.rm = TRUE),
+    within_15_mems = mean(adherence_mems15, na.rm = TRUE),
+    within_7_5_book = mean(adherence_book7_5, na.rm = TRUE),
+    within_15_book = mean(adherence_book15, na.rm = TRUE)
+  )
+
+#transform adherence table to long so that it's ready to print
+adherence_table <- adherence %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "name",
+    values_to = "prop"
+  ) %>%
+  mutate(
+    Method = if_else(grepl("_mems$", name), "MEMS", "Booklet"),
+    Window = case_when(
+      grepl("^within_7_5_", name) ~ "±7.5 minutes",
+      grepl("^within_15_",  name) ~ "±15 minutes"
+    )
+  ) %>%
+  select(Window, Method, prop) %>%
+  pivot_wider(names_from = Method, values_from = prop)
+#convert to percents
+adherence_table <- adherence_table %>%
+  mutate(
+    MEMS = scales::percent(MEMS, accuracy = 0.1),
+    Booklet = scales::percent(Booklet, accuracy = 0.1)
+  )
+#use kbl to print adherence table so that it is formatted nicely
+adherence_table %>%
+  kbl(
+    caption = "Adherence of MEMS and Booklet Sampling Times Within Specified Time Windows",
+    align = c("l", "c", "c"),
+    booktabs = TRUE,
+    linesep = ""
+  ) %>%
+  kable_styling(
+    latex_options = c("hold_position"),
+    font_size = 10
+  )
+
+```
 
 
-Agreement between booklet and electronic sampling times was evaluated using a scatterplot and a linear mixed effects model with random intercepts for subjects. Statistical hypotheses tested whether the intercept differed from zero and whether the slope differed from one. Good and adequate adherence were defined as sample collection within ±7.5 minutes and ±15 minutes, respectively, of scheduled times. Adherence proportions were calculated separately for booklet and electronic cap recorded sampling times. Changes in cortisol and DHEA over time 
+## Question 3
+Changes in cortisol and DHEA concentrations over time were evaluated using piecewise linear mixed effects models with a knot at 30 minutes after waking, using booklet time since waking. Hormone concentrations were modeled on the natural log scale. Results are presented in Table 4 as percent change in hormone concentration within each time window.
 
+For cortisol, concentrations increased by an estimated 20.2% during the first 30 minutes after waking (95%CI: -3.1%, 49.1%; p = 0.094), suggesting a possible rise during the cortisol awakening period, although this increase was not statistically significant. After 30 minutes post waking, cortisol levels declined significantly by 12.5% per hour over the remainder of the day (95% CI: -14.4%, -10.6%; p < 0.0001).
+
+For DHEA, concentrations declined significantly by 41.3% during the first 30 minutes after waking (95% CI: -51.0%, -29.7%; p < 0.0001). After 30 minutes post waking, DHEA concentrations continued to decrease, but at a slower rate of 8.8% per hour over the remainder of the day (95% CI: -10.5%, -7.2%; p < 0.0001).
+
+These results are supported by the predicted diurnal curves in Figure 2, which show an early morning rise in cortisol followed by a gradual decline, and a steady decline in DHEA concentrations throughout the day.
+
+```{r, echo=FALSE}
+##########--------QUESTION 3------#############
+#subject 3037 has several DHEA measures at detection limit so remove from Q3 analysis
+q3_data <- p0_data %>%
+  filter(SubjectID != 3037)
+
+#cortisol data filtering out samples with cortisol values over 80 due to lab error
+cortisol_data <- q3_data %>%
+  filter(cortisol <=80)
+
+#dhea data filtering out samples with dhea == 5.205
+dhea_data <- q3_data %>%
+  filter(dhea < 5.205)
+#create piecewise at 30 mins for mems time
+cortisol_data <- cortisol_data %>%
+  mutate(
+    booklet_step = pmax(0, booklet_interval-0.5)
+  )
+#distribution of cortisol is not normal whereas log(x) is approx normal so use log transformed
+q3_cortmod1 <- lmer(log(cortisol) ~ booklet_interval + booklet_step + (1|SubjectID),
+                    data = cortisol_data)
+
+
+#create piecewise at 30 mins for mems time
+dhea_data <- dhea_data %>%
+  mutate(
+    booklet_step = pmax(0, booklet_interval-0.5)
+  )
+
+#distribution of dhea is not normal whereas log(x) is a bit better
+q3_dheamod1 <- lmer(log(dhea) ~ booklet_interval + booklet_step + (1|SubjectID),
+                    data = dhea_data)
+
+
+##code for creating table of back transformed and interpretable change in hormones pre and post 30 mins
+#cortisol
+b_cort <- fixef(q3_cortmod1) #fixed effects for cort model
+V_cort <- vcov(q3_cortmod1) #var-cov matrix for cort model
+
+b1_c <- b_cort["booklet_interval"]
+b2_c <- b_cort["booklet_step"]
+
+# Slopes
+slope_c_0_30 <- b1_c
+slope_c_30p  <- b1_c + b2_c
+
+# SEs
+se_c_0_30 <- sqrt(V_cort["booklet_interval","booklet_interval"])
+se_c_30p  <- sqrt(
+  V_cort["booklet_interval","booklet_interval"] +
+  V_cort["booklet_step","booklet_step"] +
+  2*V_cort["booklet_interval","booklet_step"]
+)
+
+# df + p-values from model summary
+coef_c <- summary(q3_cortmod1)$coefficients
+df_c <- coef_c["booklet_interval","df"]
+p_c_0_30 <- coef_c["booklet_interval","Pr(>|t|)"]
+
+# Wald p for combined slope
+t_c_30p <- slope_c_30p / se_c_30p
+p_c_30p <- 2 * pt(abs(t_c_30p), df=df_c, lower.tail=FALSE)
+
+crit_c <- qt(0.975, df_c)
+
+#dhea
+b_dhea <- fixef(q3_dheamod1)
+V_dhea <- vcov(q3_dheamod1)
+
+b1_d <- b_dhea["booklet_interval"]
+b2_d <- b_dhea["booklet_step"]
+
+slope_d_0_30 <- b1_d
+slope_d_30p  <- b1_d + b2_d
+
+se_d_0_30 <- sqrt(V_dhea["booklet_interval","booklet_interval"])
+se_d_30p  <- sqrt(
+  V_dhea["booklet_interval","booklet_interval"] +
+  V_dhea["booklet_step","booklet_step"] +
+  2*V_dhea["booklet_interval","booklet_step"]
+)
+
+coef_d <- summary(q3_dheamod1)$coefficients
+df_d <- coef_d["booklet_interval","df"]
+p_d_0_30 <- coef_d["booklet_interval","Pr(>|t|)"]
+
+t_d_30p <- slope_d_30p / se_d_30p
+p_d_30p <- 2 * pt(abs(t_d_30p), df=df_d, lower.tail=FALSE)
+
+crit_d <- qt(0.975, df_d)
+
+#create final table by putting together all necessary parts
+final_q3_table <- tibble(
+  `Time Window` = c("0–30 min", "30+ min"),
+  `Cortisol % Change` = c(
+    round((exp(slope_c_0_30 * 0.5) - 1) * 100, 1),   
+    round((exp(slope_c_30p) - 1) * 100, 1)           
+  ),
+
+  `Cortisol 95% CI` = c(
+    paste0("[",
+      round((exp((slope_c_0_30 - crit_c*se_c_0_30) * 0.5) - 1) * 100, 1),
+      ", ",
+      round((exp((slope_c_0_30 + crit_c*se_c_0_30) * 0.5) - 1) * 100, 1),
+      "]"
+    ),
+    paste0("[",
+      round((exp(slope_c_30p - crit_c*se_c_30p) - 1) * 100, 1),
+      ", ",
+      round((exp(slope_c_30p + crit_c*se_c_30p) - 1) * 100, 1),
+      "]"
+    )
+  ),
+
+  `Cortisol P-value` = ifelse(
+    c(p_c_0_30, p_c_30p) < 0.0001,
+    "<0.0001",
+    formatC(c(p_c_0_30, p_c_30p), format="f", digits=4)
+  ),
+
+  `DHEA % Change` = c(
+    round((exp(slope_d_0_30 * 0.5) - 1) * 100, 1),
+    round((exp(slope_d_30p) - 1) * 100, 1)
+  ),
+
+  `DHEA 95% CI` = c(
+    paste0("[",
+      round((exp((slope_d_0_30 - crit_d*se_d_0_30) * 0.5) - 1) * 100, 1),
+      ", ",
+      round((exp((slope_d_0_30 + crit_d*se_d_0_30) * 0.5) - 1) * 100, 1),
+      "]"
+    ),
+    paste0("[",
+      round((exp(slope_d_30p - crit_d*se_d_30p) - 1) * 100, 1),
+      ", ",
+      round((exp(slope_d_30p + crit_d*se_d_30p) - 1) * 100, 1),
+      "]"
+    )
+  ),
+
+  `DHEA P-value` = ifelse(
+    c(p_d_0_30, p_d_30p) < 0.0001,
+    "<0.0001",
+    formatC(c(p_d_0_30, p_d_30p), format="f", digits=4)
+  )
+)
+
+
+#prints table/knits to pdf nicely
+kbl(
+  final_q3_table,
+  format="latex",
+  booktabs=TRUE,
+  align="lccc|ccc",
+  caption="Percent change in hormone concentrations"
+) %>%
+add_header_above(c(" " = 1, "Cortisol Model" = 3, "DHEA Model" = 3)) %>%
+kable_styling(
+  latex_options=c("hold_position","scale_down"),   
+  font_size=9                                      
+) %>%
+column_spec(1, width="2.8cm") %>%
+column_spec(2:7, width="1.8cm")
+
+```
+
+
+```{r, echo=FALSE, fig.cap= "Predicted Cortisol (left) and DHEA (right) Diurnal Curves"}
+#cortisol prediction grid
+cort_grid <- data.frame(
+  booklet_interval = seq(0, 12, length = 200)
+)
+
+cort_grid$booklet_step <- pmax(0, cort_grid$booklet_interval - 0.5)
+
+cort_grid$pred <- predict(q3_cortmod1,
+                          newdata = cort_grid,
+                          re.form = NA)
+#plot of predicted over observed
+p_cort <- ggplot(cortisol_data,
+       aes(booklet_interval, log(cortisol))) +
+  geom_point(alpha = 0.4) +
+  geom_line(data = cort_grid,
+            aes(booklet_interval, pred),
+            linewidth = 1.2, col = "red") +
+  labs(
+    x = "Time Since Wake (hours)",
+    y = "log(Cortisol)"
+  )
+
+#dhea predicted grid
+dhea_grid <- data.frame(
+  booklet_interval = seq(0, 12, length = 200)
+)
+
+dhea_grid$booklet_step <- pmax(0, dhea_grid$booklet_interval - 0.5)
+
+dhea_grid$pred <- predict(q3_dheamod1,
+                          newdata = dhea_grid,
+                          re.form = NA)
+#plot of predicted over observed
+p_dhea <- ggplot(dhea_data,
+       aes(booklet_interval, log(dhea))) +
+  geom_point(alpha = 0.4) +
+  geom_line(data = dhea_grid,
+            aes(booklet_interval, pred),
+            linewidth = 1.2, col = "red") +
+  labs(
+    x = "Time Since Wake (hours)",
+    y = "log(DHEA)"
+  )
+p_cort + p_dhea
+```
+
+
+# Discussion
+The purpose of this study was to evaluate sampling time recording methods and characterize patterns of hormone levels over time to inform future investigations of stress related endocrine function. Agreement between subject recorded sampling times electronic monitoring cap recorded sampling times was evaluated using a scatterplot and linear mixed effects regression modeling. Adherence to the study protocol sampling times was evaluated by calculating the proportion of samples collected within ±7.5 (good adherence) and ±15 (adequate adherence) of protocol specified sampling times at 30 minutes and 10 hours after waking. Patterns of cortisol and DHEA concentrations over time were analyzed to determine whether observed hormone trends were consistent with expected biological diurnal patterns using piecewise linear mixed effects models with a knot at 30 minutes post waking.
+
+We observed a small but statistically significant constant difference between MEMs and booklet recorded sampling times. However, the magnitude of this difference was small and unlikely to be clinically meaningful. Adherence analysis showed higher proportions of samples within protocol specified time windows when using booklets comapred to MEMs. Higher adherence using booklets may reflect subjects recording intended sampling times rather than actual sampling behavior. Because MEMs caps automatically record sample time, these values may represent true sampling behavior but may also capture delays between collecting the sample and storing the sample in the bottle. These findings highlight possible differences between each sampling method and suggest that each method provides pros and cons. 
+
+Observed cortisol and DHEA patterns ove rtime were consistent with expected biological trends. Cortisol concentrations increased from waking to about 30 minutes post waking and declined throughout the remainder of the day. DHEA concentration demonstrated an overall decline across the day with an especially steep decline from waking to 30 minutes post waking. These findings support the biological validity of the collected samples and suggest the booklet collection system is capable of capturing diurnal hormone patterns.
+
+This study has several strengths. The repeated measures design allows analysis of within-subject hormone trends over time. The availability of self reported and electronicaly recorded sampling times allowed for direct comparing of sampling methods. Several limitations need to be considered when interpreting these findings. Booklet times are subject to recall or reporting bias which may influence hormone modeling results. The small sample size and short sampling period limits the generalizability of the results to a broader population. 
+
+Overall, the booklet and MEMS monitoring system demonstrated strong agreement in sampling time measurement and successfully captured expected diurnal hormone patterns. These findings support the feasibility of home-based saliva collection methods for studying diurnal stress hormone patterns and may help inform future studies evaluating endocrine function.
