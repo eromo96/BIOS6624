@@ -667,3 +667,8 @@ Observed cortisol and DHEA patterns over time were consistent with expected biol
 This study has several strengths. The repeated measures design allows analysis of within-subject hormone trends over time. The availability of self reported and electronically recorded sampling times allowed for direct comparing of sampling methods. Several limitations need to be considered when interpreting these findings. Booklet times are subject to recall or reporting bias which may influence hormone modeling results. The small sample size and short sampling period limits the generalization of the results to a broader population. 
 
 Overall, the booklet and MEMS monitoring system demonstrated strong agreement in sampling time measurement and successfully captured expected diurnal hormone patterns. These findings support the feasibility of home-based saliva collection methods for studying diurnal stress hormone patterns and may help inform future studies evaluating endocrine function.
+
+
+# Reproducible Research Information
+https://github.com/eromo96/BIOS6624.git
+Data Location: /Users/eduardo/Eduardo/UColorado PhD Bios/Spring 26/BIOS6624 Advanced Statistical Methods/BIOS6624/Project0/Data

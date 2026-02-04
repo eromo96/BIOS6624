@@ -1,11 +1,11 @@
-#data cleaning for project0 data
+#######data cleaning and analysis for project0 data
 library(kableExtra)
 library(tidyverse)
 library(lme4)
 library(lmerTest)
 #read in data
 p0_data <- read_csv("./Project0/Data/Project0_Clean_v2.csv")
-
+#####NOTE: file path for data: /Users/eduardo/Eduardo/UColorado PhD Bios/Spring 26/BIOS6624 Advanced Statistical Methods/BIOS6624/Project0/Data
 #remove columns that wont be used for data analysis
 p0_data <- p0_data %>%
   select(-`Booklet: Sample interval`, -`Booklet: Sample interval Decimal Time (mins)`, -`MEMs: Sample interval`,
