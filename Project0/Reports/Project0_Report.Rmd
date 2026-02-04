@@ -107,126 +107,159 @@ The mean difference between MEMs and booklet sampling times was approximately 0.
 Mean cortisol concentrations followed the pattern anticipated by the investigator, with the highest average concentration observed at Sample 2 (8.94 nmol/L) followed by decreasing concentrations across later sampling times. 
 
 
-```{r, echo=FALSE}
+```{r, echo=FALSE, cache=FALSE}
 # ---- Prep analysis dataset ----
 table1_data <- p0_data %>%
   mutate(
     Sample = factor(sample,
                     levels = 1:4,
-                    labels = c("Sample 1\n(Wake)",
-                               "Sample 2\n(+30 min)",
-                               "Sample 3\n(Lunch)",
-                               "Sample 4\n(+10 hr)")
-    ),
+                    labels = c("Sample 1 (Wake)",
+                               "Sample 2 (+30 min)",
+                               "Sample 3 (Lunch)",
+                               "Sample 4 (+10 hr)")),
     time_diff = mems_interval - booklet_interval
   )
 
 # ---- Helper formatters ----
 fmt_mean_sd <- function(x, digits = 2){
-  if(all(is.na(x))) return(NA_character_)
+  if(all(is.na(x))) return("")
   sprintf(paste0("%.",digits,"f (%.",digits,"f)"),
           mean(x, na.rm = TRUE),
           sd(x, na.rm = TRUE))
 }
 
 fmt_median_iqr <- function(x, digits = 2){
-  if(all(is.na(x))) return(NA_character_)
+  if(all(is.na(x))) return("")
   q <- quantile(x, c(.25,.5,.75), na.rm = TRUE)
   sprintf(paste0("%.",digits,"f [%.",digits,"f, %.",digits,"f]"),
           q[2], q[1], q[3])
 }
 
-fmt_missing <- function(x){
+missing_cell <- function(x) {
   n_miss <- sum(is.na(x))
-  p_miss <- mean(is.na(x)) * 100
-  sprintf("%d (%.1f%%)", n_miss, p_miss)
+  p_miss <- round(mean(is.na(x)) * 100, 1)
+  # build string by hand; LaTeX-safe percent is \%
+  paste0(n_miss, " (", format(p_miss, nsmall = 1), "\\%)")
 }
 
-# ---- By-sample summaries (LONG) ----
-table1_long <- table1_data %>%
+# ---- Summaries by Sample (wide) ----
+by_sample <- table1_data %>%
   group_by(Sample) %>%
   summarise(
-    N = as.character(n()),
-    
+    N            = as.character(n()),
+    mems_mean_sd = fmt_mean_sd(mems_interval),
+    mems_med_iqr = fmt_median_iqr(mems_interval),
+    mems_miss    = missing_cell(mems_interval),
+
+    book_mean_sd = fmt_mean_sd(booklet_interval),
+    book_med_iqr = fmt_median_iqr(booklet_interval),
+    book_miss    = missing_cell(booklet_interval),
+
     diff_mean_sd = fmt_mean_sd(time_diff),
     diff_med_iqr = fmt_median_iqr(time_diff),
-    diff_miss    = fmt_missing(time_diff),
-    
+    diff_miss    = missing_cell(time_diff),
+
     cort_mean_sd = fmt_mean_sd(cortisol),
     cort_med_iqr = fmt_median_iqr(cortisol),
-    cort_miss    = fmt_missing(cortisol),
-    
+    cort_miss    = missing_cell(cortisol),
+
     dhea_mean_sd = fmt_mean_sd(dhea),
     dhea_med_iqr = fmt_median_iqr(dhea),
-    dhea_miss    = fmt_missing(dhea),
-    
+    dhea_miss    = missing_cell(dhea),
     .groups = "drop"
   ) %>%
-  pivot_longer(-Sample, names_to = "Statistic", values_to = "Value")
+  pivot_longer(-Sample, names_to="key", values_to="val") %>%
+  pivot_wider(names_from = Sample, values_from = val)
 
-# ---- Overall summaries (LONG) ----
-overall_long <- table1_data %>%
+# ---- Overall column ----
+overall <- table1_data %>%
   summarise(
-    N = as.character(n()),
-    
+    Sample       = "Overall",
+    N            = as.character(n()),
+    mems_mean_sd = fmt_mean_sd(mems_interval),
+    mems_med_iqr = fmt_median_iqr(mems_interval),
+    mems_miss    = missing_cell(mems_interval),
+
+    book_mean_sd = fmt_mean_sd(booklet_interval),
+    book_med_iqr = fmt_median_iqr(booklet_interval),
+    book_miss    = missing_cell(booklet_interval),
+
     diff_mean_sd = fmt_mean_sd(time_diff),
     diff_med_iqr = fmt_median_iqr(time_diff),
-    diff_miss    = fmt_missing(time_diff),
-    
+    diff_miss    = missing_cell(time_diff),
+
     cort_mean_sd = fmt_mean_sd(cortisol),
     cort_med_iqr = fmt_median_iqr(cortisol),
-    cort_miss    = fmt_missing(cortisol),
-    
+    cort_miss    = missing_cell(cortisol),
+
     dhea_mean_sd = fmt_mean_sd(dhea),
     dhea_med_iqr = fmt_median_iqr(dhea),
-    dhea_miss    = fmt_missing(dhea)
+    dhea_miss    = missing_cell(dhea)
   ) %>%
-  pivot_longer(everything(), names_to = "Statistic", values_to = "Value") %>%
-  mutate(Sample = "Overall")
+  pivot_longer(-Sample, names_to="key", values_to="val") %>%
+  select(-Sample) %>%
+  rename(Overall = val)
 
-# ---- Combine + order + relabel stats + flip to wide ----
-stat_order <- c(
-  "N",
-  "diff_mean_sd", "diff_med_iqr", "diff_miss",
-  "cort_mean_sd", "cort_med_iqr", "cort_miss",
-  "dhea_mean_sd", "dhea_med_iqr", "dhea_miss"
+# ---- Merge sample columns + overall ----
+wide <- by_sample %>%
+  left_join(overall, by="key")
+
+# build row structure i want so that there are bolded sub headers and indented statistics
+indent <- "\\hspace{3mm}"
+
+row_map <- tibble::tribble(
+  ~row_key,        ~Statistic,
+  "N",             "N",
+
+  "mems_hdr",      "\\textbf{MEMS time since wake (hours)}",
+  "mems_mean_sd",  paste0(indent, "mean (SD)"),
+  "mems_med_iqr",  paste0(indent, "median [IQR]"),
+  "mems_miss",     paste0(indent, "missing, n (\\%)"),
+
+  "book_hdr",      "\\textbf{Booklet time since wake (hours)}",
+  "book_mean_sd",  paste0(indent, "mean (SD)"),
+  "book_med_iqr",  paste0(indent, "median [IQR]"),
+  "book_miss",     paste0(indent, "missing, n (\\%)"),
+
+  "diff_hdr",      "\\textbf{Time diff (MEMS -- Booklet) [hours]}",
+  "diff_mean_sd",  paste0(indent, "mean (SD)"),
+  "diff_med_iqr",  paste0(indent, "median [IQR]"),
+  "diff_miss",     paste0(indent, "missing, n (\\%)"),
+
+  "cort_hdr",      "\\textbf{Cortisol (nmol/L)}",
+  "cort_mean_sd",  paste0(indent, "mean (SD)"),
+  "cort_med_iqr",  paste0(indent, "median [IQR]"),
+  "cort_miss",     paste0(indent, "missing, n (\\%)"),
+
+  "dhea_hdr",      "\\textbf{DHEA (nmol/L)}",
+  "dhea_mean_sd",  paste0(indent, "mean (SD)"),
+  "dhea_med_iqr",  paste0(indent, "median [IQR]"),
+  "dhea_miss",     paste0(indent, "missing, n (\\%)")
 )
 
-table1_final <- bind_rows(table1_long, overall_long) %>%
-  mutate(
-    stat_key = factor(Statistic, levels = stat_order),
-    Statistic = recode(Statistic,
-                       N = "N",
-                       
-                       diff_mean_sd = "Time diff (MEMS − Booklet), mean (SD) [hours]",
-                       diff_med_iqr = "Time diff (MEMS − Booklet), median [IQR] [hours]",
-                       diff_miss    = "Time diff missing, n (%)",
-                       
-                       cort_mean_sd = "Cortisol (nmol/L), mean (SD)",
-                       cort_med_iqr = "Cortisol (nmol/L), median [IQR]",
-                       cort_miss    = "Cortisol missing, n (%)",
-                       
-                       dhea_mean_sd = "DHEA (nmol/L), mean (SD)",
-                       dhea_med_iqr = "DHEA (nmol/L), median [IQR]",
-                       dhea_miss    = "DHEA missing, n (%)"
-    )
-  ) %>%
-  arrange(stat_key) %>%               
-  select(-stat_key) %>%              
-  pivot_wider(names_from = Sample, values_from = Value)
+# Join values for the actual stat rows; keep header rows with blanks
+tab_vals <- wide %>%
+  rename(row_key = key)
 
-# ---- Render to PDF using kableExtra ----
+table1_out <- row_map %>%
+  left_join(tab_vals, by = "row_key") %>%
+  mutate(
+    across(where(is.character), ~replace_na(.x, ""))  # blanks for header rows
+  ) %>%
+  select(-row_key)
+
+
+# render using kable so that it knits to pdf nicely
 kable(
-  table1_final,
-  format = "latex",
+  table1_out,
+  format   = "latex",
   booktabs = TRUE,
-  align = "lccccc",
-  caption = "Descriptive statistics by sample collection time"
+  align    = "lccccc",
+  caption  = "Descriptive statistics by sample collection time",
+  escape   = FALSE
 ) %>%
-  kable_styling(
-    latex_options = c("hold_position", "scale_down"),
-    font_size = 10
-  )
+  kable_styling(latex_options = c("hold_position", "scale_down"), font_size = 10)
+
 ```
 
 
