@@ -67,7 +67,7 @@ table1_data <- p0_data %>%
     time_diff = mems_interval - booklet_interval
   )
 
-# ---- Helper formatters ----
+# ---- Helper functions ----
 fmt_mean_sd <- function(x, digits = 2){
   if(all(is.na(x))) return("")
   sprintf(paste0("%.",digits,"f (%.",digits,"f)"),
@@ -665,3 +665,4 @@ kbl(
   ) %>%
   column_spec(1, width="2.8cm") %>%
   column_spec(2:7, width="1.8cm")
+
