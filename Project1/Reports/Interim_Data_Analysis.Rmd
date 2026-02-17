@@ -1,0 +1,36 @@
+---
+title: "Project1: Interim Data Analysis Plan"
+author: "Eduardo Romo"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    number_sections: false
+    toc: false
+fontsize: 12pt
+geometry: margin=1in
+header-includes:
+  - \usepackage{setspace}
+  - \doublespacing
+  - \usepackage{float}
+  - \floatplacement{figure}{H}
+  - \floatplacement{table}{H}
+  - \setlength{\parindent}{2em}
+  - \setlength{\parskip}{0pt}
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 6.5, fig.height = 4.5
+)
+
+```
+
+# Introduction
+Highly Active Antiretroviral Therapy (HAART) is the standard treatment regimen for patients diagnosed with HIV. HAART suppresses viral replication, improving immune function as reflected by increases in CD4+ T cell counts, and substantially reducing mortality and disease progression. The Multicenter AIDS Cohort Study is an ongoing prospective cohort study of the natural and treated histories of HIV-1 infection in homosexual and bisexual men in four major cities in the United States. The dataset used in this project includes annual longitudinal laboratory and quality of life measurements, along with demographic and clinical health information, collected for up to eight years after HIV-infected men initiated HAART. 
+
+Investigators are interested in conducting a secondary data analysis to evaluate whether hard drug use at baseline is associated with poorer treatment response following HAART initiation. The primary scientific hypothesis is that subjects who report hard drug use at baseline will have worse treatment response two years after initiating HAART compared to subjects who do not report hard drug use. Treatment response will be evaluated using four complementary outcomes: viral load, CD4+ T cell count, and physical and mental quality of life scores.
+
+The corresponding statistical hypotheses evaluate whether mean treatment response at two years differs by baseline hard drug use status for each outcome, adjusting for age, BMI, smoking status, education, and race/ethnicity. For each outcome, the null hypothesis is that there is no difference in mean treatment response between subjects who report hard drug use at baseline and those who do not, while the alternative hypothesis is that a difference exists. These hypotheses will be evaluated using both Bayesian and frequentist methods.
