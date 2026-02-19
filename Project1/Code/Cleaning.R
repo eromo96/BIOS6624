@@ -26,6 +26,12 @@ hiv_data <- hiv_data %>%
     levels = c(1, 2), labels = c("No College Degree", "College Degree")
     )
   )
+
+#recode abnormal BMI values so that they are missing/NAs
+hiv_data <- hiv_data %>%
+  mutate(
+    BMI = if_else(BMI <= 0 | BMI > 250, NA_real_, BMI)
+  )
 #create labelled versions of categorical variables
 hiv_data <- hiv_data %>%
   mutate(

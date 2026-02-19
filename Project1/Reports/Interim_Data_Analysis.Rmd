@@ -31,37 +31,39 @@ library(knitr)
 library(kableExtra)
 library(stringr)
 library(tidyverse)
-#read in data
 hiv_data <- read_csv("../Data/hiv_6624_final.csv") %>%
   select(-`...1`)
 
 #see unique race and education levels in data to see which labels are needed
 unique(hiv_data$RACE)
+unique(hiv_data$EDUCBAS)
 
+#collapse race variable to White vs Other
+hiv_data <- hiv_data %>%
+  mutate(
+    race_cat = factor(case_when(
+      RACE %in% c(1, 2) ~ 1,
+      RACE %in% c(3, 4, 7, 8) ~ 2
+    ),
+  levels = c(1, 2), labels = c("White", "Other")))
+#collapse education variable to College Degree+ vs Non College Degree
+hiv_data <- hiv_data %>%
+  mutate(
+    edu_cat = factor(case_when(
+      EDUCBAS %in% c(1, 2, 3, 4) ~ 1,
+      EDUCBAS %in% c(5, 6, 7) ~ 2
+    ),
+    levels = c(1, 2), labels = c("No College Degree", "College Degree")
+    )
+  )
+#recode abnormal BMI values so that they are missing/NAs
+hiv_data <- hiv_data %>%
+  mutate(
+    BMI = if_else(BMI <= 0 | BMI > 250, NA_real_, BMI)
+  )
 #create labelled versions of categorical variables
 hiv_data <- hiv_data %>%
   mutate(
-    race_cat = factor(
-      RACE,
-      levels = c(1, 2, 3, 4, 7, 8),
-      labels = c("White, non-Hispanic",
-                 "White, Hispanic",
-                 "Black, non-Hispanic",
-                 "Black, Hispanic",
-                 "Other",
-                 "Other Hispanic")
-    ),
-    edu_cat = factor(
-      EDUCBAS,
-      levels = c(1, 2, 3, 4, 5, 6, 7),
-      labels = c("8th grade or less",
-                 "9, 10, or 11th grade",
-                 "12th grade",
-                 "At least one year college but no degree",
-                 "Four years college/ got degree",
-                 "Some graduate work",
-                 "Post-graduate degree")
-    ),
     smoke_cat = factor(
       SMOKE,
       levels = c(1, 2, 3),
@@ -107,7 +109,16 @@ hivp1_data <- hiv_data %>%
   ) %>%
   select(newid, ends_with("_0"), ends_with("_2"), starts_with("d_"))
 
-
+# try log10 transformation of ratio of VLOAD_2 and VLOAD_0
+hivp1_data <- hivp1_data %>%
+  mutate(
+    r_logVLOAD = log10(VLOAD_2/VLOAD_0),
+    logVLOAD_0 = log10(VLOAD_0)
+  )
+#exclude observations that have missing values for outcomes for the descriptive
+#summaries and analysis
+hivp1_data <- hivp1_data %>%
+  drop_na(d_AGG_MENT, d_AGG_PHYS, d_LEU3N, r_logVLOAD)
 
 ### ---- code for creating table 1 --------
 # --- helper functions ---
@@ -122,13 +133,6 @@ fmt_mean_sd <- function(x) {
   sprintf("%.1f (%.1f)", mean(x), sd(x))
 }
 
-fmt_median_iqr <- function(x) {
-  x <- x[!is.na(x)]
-  if (length(x) == 0) return(NA_character_)
-  q <- quantile(x, probs = c(0.25, 0.5, 0.75))
-  sprintf("%.1f [%.1f, %.1f]", q[[2]], q[[1]], q[[3]])
-}
-
 fmt_missing <- function(x) {
   n_miss <- sum(is.na(x))
   p_miss <- mean(is.na(x)) * 100
@@ -138,15 +142,19 @@ fmt_missing <- function(x) {
 # --- main Table 1 function ---
 make_table1 <- function(df,
                         group_var = hard_drugs_cat,
-                        cont_vars = c("BMI_0","age_0"),
+                        cont_vars = c("BMI_0","age_0", "LEU3N_0", "logVLOAD_0", "AGG_MENT_0", "AGG_PHYS_0"),
                         cat_vars  = c("smoke_cat_0","adh_cat_2","race_cat_0","edu_cat_0"),
                         var_labels = list(
-                          BMI_0    = "BMI (baseline)",
-                          age_0    = "Age (baseline)",
-                          smoke_cat_0 = "Smoking status (baseline)",
+                          BMI_0    = "BMI",
+                          age_0    = "Age",
+                          smoke_cat_0 = "Smoking status",
                           adh_cat_2   = "Adherence category (year 2)",
-                          race_cat_0  = "Race/ethnicity (baseline)",
-                          edu_cat_0   = "Education (baseline)"
+                          race_cat_0  = "Race/ethnicity",
+                          edu_cat_0   = "Education",
+                          LEU3N_0 = "CD4+ Count",
+                          logVLOAD_0 = "Log Viral Load",
+                          AGG_MENT_0 = "Mental Quality of Life",
+                          AGG_PHYS_0 = "Physical Quality of Life"
                         )) {
   
   # ensure group is a factor with nice labels
@@ -164,33 +172,30 @@ make_table1 <- function(df,
     lab <- var_labels[[v]] %||% v
     
     overall_mean_sd   <- fmt_mean_sd(df[[v]])
-    overall_med_iqr   <- fmt_median_iqr(df[[v]])
     overall_miss      <- fmt_missing(df[[v]])
     
     bygrp <- df %>%
       group_by(.group) %>%
       summarise(
         mean_sd = fmt_mean_sd(.data[[v]]),
-        med_iqr = fmt_median_iqr(.data[[v]]),
         miss    = fmt_missing(.data[[v]]),
         .groups = "drop"
       ) %>%
       right_join(n_bygrp, by = ".group") %>%
       arrange(.group)
     
-    # build rows: Mean (SD), Median [IQR], Missing
+    # build rows: Mean (SD), Missing
     out <- tibble(
-      Variable = c(lab, "", ""),
-      Level = c("Mean (SD)", "Median [IQR]", "Missing"),
-      Overall = c(overall_mean_sd, overall_med_iqr, overall_miss)
+      Variable = c(lab, ""),
+      Level = c("Mean (SD)", "Missing"),
+      Overall = c(overall_mean_sd, overall_miss)
     )
     
     # add each group as columns (No/Yes)
     for (g in levels(df$.group)) {
       val_mean_sd <- bygrp$mean_sd[bygrp$.group == g]
-      val_med_iqr <- bygrp$med_iqr[bygrp$.group == g]
       val_miss    <- bygrp$miss[bygrp$.group == g]
-      out[[as.character(g)]] <- c(val_mean_sd, val_med_iqr, val_miss)
+      out[[as.character(g)]] <- c(val_mean_sd, val_miss)
     }
     
     out
@@ -272,7 +277,7 @@ make_table1 <- function(df,
 tab1 <- make_table1(
   hivp1_data,
   group_var = hard_drugs_cat_0,   # baseline hard drug use category column after pivot
-  cont_vars = c("BMI_0","age_0"),
+  cont_vars = c("BMI_0","age_0", "LEU3N_0", "logVLOAD_0", "AGG_MENT_0", "AGG_PHYS_0"),
   cat_vars  = c("smoke_cat_0","adh_cat_2","race_cat_0","edu_cat_0")
 )
 
@@ -292,8 +297,8 @@ table1 <- kbl(
   escape = FALSE,
   linesep = "") %>%
   kable_styling(latex_options = c("hold_position", "repeat_header"), font_size = 8) %>%
-  column_spec(1, width = "4.0cm") %>%
-  column_spec(2, width = "3.0cm") %>%
+  column_spec(1, width = "4.5cm") %>%
+  column_spec(2, width = "2.5cm") %>%
   column_spec(3:ncol(tab1), width = "2.2cm")
 ```
 
@@ -314,6 +319,8 @@ Primary analyses will evaluate the association between baseline hard drug use an
 Additionally, mediation analyses will be conducted using linear regression-based approaches to evaluate whether treatment adherence mediates the relationship between baseline hard drug use and treatment response. Both Bayesian and frequentist mediation models will be fit and compared using corresponding interval estimates and measures of statistical or posterior evidence.
 
 # Preliminary Analysis
+
+\newpage
 
 ```{r, echo=FALSE, cache=FALSE}
 table1

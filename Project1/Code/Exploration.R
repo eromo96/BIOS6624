@@ -3,7 +3,7 @@ library(knitr)
 library(kableExtra)
 library(stringr)
 #read in code form cleaning script so that we dont have to redo data cleaning here
-source("./Project1/Scripts/Cleaning.R")
+source("./Project1/Code/Cleaning.R")
 
 #create analysis dataset
 hivp1_data <- hiv_data %>%
@@ -28,15 +28,17 @@ hivp1_data <- hiv_data %>%
   ) %>%
   select(newid, ends_with("_0"), ends_with("_2"), starts_with("d_"))
 
+
 #run histograms of outcomes to see if normally distributed
 hist(hivp1_data$d_AGG_MENT) #looks approx normal
 hist(hivp1_data$d_AGG_PHYS) #looks approx normal
 hist(hivp1_data$d_LEU3N) #looks approx normal
 hist(hivp1_data$d_VLOAD) #very skewed
-# try ln transformation of ratio of VLOAD_2 and VLOAD_0
+# try log10 transformation of ratio of VLOAD_2 and VLOAD_0
 hivp1_data <- hivp1_data %>%
   mutate(
-    r_logVLOAD = log(VLOAD_2/VLOAD_0)
+    r_logVLOAD = log10(VLOAD_2/VLOAD_0),
+    logVLOAD_0 = log10(VLOAD_0)
   )
 hist(hivp1_data$r_logVLOAD) #looks a lot more normal now
 
@@ -66,6 +68,11 @@ kbl(miss_tbl, format="latex", booktabs=TRUE, digits=1,
     escape=FALSE) %>%
   kable_styling(latex_options=c("hold_position"))
 
+#exclude observations that have missing values for outcomes for the descriptive
+#summaries and analysis
+hivp1_data <- hivp1_data %>%
+  drop_na(d_AGG_MENT, d_AGG_PHYS, d_LEU3N, r_logVLOAD)
+
 ### ---- code for creating table 1 --------
 # --- helper functions ---
 fmt_n_pct <- function(n, denom) {
@@ -79,13 +86,6 @@ fmt_mean_sd <- function(x) {
   sprintf("%.1f (%.1f)", mean(x), sd(x))
 }
 
-fmt_median_iqr <- function(x) {
-  x <- x[!is.na(x)]
-  if (length(x) == 0) return(NA_character_)
-  q <- quantile(x, probs = c(0.25, 0.5, 0.75))
-  sprintf("%.1f [%.1f, %.1f]", q[[2]], q[[1]], q[[3]])
-}
-
 fmt_missing <- function(x) {
   n_miss <- sum(is.na(x))
   p_miss <- mean(is.na(x)) * 100
@@ -95,15 +95,19 @@ fmt_missing <- function(x) {
 # --- main Table 1 function ---
 make_table1 <- function(df,
                         group_var = hard_drugs_cat,
-                        cont_vars = c("BMI_0","age_0"),
+                        cont_vars = c("BMI_0","age_0", "LEU3N_0", "logVLOAD_0", "AGG_MENT_0", "AGG_PHYS_0"),
                         cat_vars  = c("smoke_cat_0","adh_cat_2","race_cat_0","edu_cat_0"),
                         var_labels = list(
-                          BMI_0    = "BMI (baseline)",
-                          age_0    = "Age (baseline)",
-                          smoke_cat_0 = "Smoking status (baseline)",
+                          BMI_0    = "BMI",
+                          age_0    = "Age",
+                          smoke_cat_0 = "Smoking status",
                           adh_cat_2   = "Adherence category (year 2)",
-                          race_cat_0  = "Race/ethnicity (baseline)",
-                          edu_cat_0   = "Education (baseline)"
+                          race_cat_0  = "Race/ethnicity",
+                          edu_cat_0   = "Education",
+                          LEU3N_0 = "CD4+ Count",
+                          logVLOAD_0 = "Log Viral Load",
+                          AGG_MENT_0 = "Mental Quality of Life",
+                          AGG_PHYS_0 = "Physical Quality of Life"
                         )) {
   
   # ensure group is a factor with nice labels
@@ -121,33 +125,30 @@ make_table1 <- function(df,
     lab <- var_labels[[v]] %||% v
     
     overall_mean_sd   <- fmt_mean_sd(df[[v]])
-    overall_med_iqr   <- fmt_median_iqr(df[[v]])
     overall_miss      <- fmt_missing(df[[v]])
     
     bygrp <- df %>%
       group_by(.group) %>%
       summarise(
         mean_sd = fmt_mean_sd(.data[[v]]),
-        med_iqr = fmt_median_iqr(.data[[v]]),
         miss    = fmt_missing(.data[[v]]),
         .groups = "drop"
       ) %>%
       right_join(n_bygrp, by = ".group") %>%
       arrange(.group)
     
-    # build rows: Mean (SD), Median [IQR], Missing
+    # build rows: Mean (SD), Missing
     out <- tibble(
-      Variable = c(lab, "", ""),
-      Level = c("Mean (SD)", "Median [IQR]", "Missing"),
-      Overall = c(overall_mean_sd, overall_med_iqr, overall_miss)
+      Variable = c(lab, ""),
+      Level = c("Mean (SD)", "Missing"),
+      Overall = c(overall_mean_sd, overall_miss)
     )
     
     # add each group as columns (No/Yes)
     for (g in levels(df$.group)) {
       val_mean_sd <- bygrp$mean_sd[bygrp$.group == g]
-      val_med_iqr <- bygrp$med_iqr[bygrp$.group == g]
       val_miss    <- bygrp$miss[bygrp$.group == g]
-      out[[as.character(g)]] <- c(val_mean_sd, val_med_iqr, val_miss)
+      out[[as.character(g)]] <- c(val_mean_sd, val_miss)
     }
     
     out
@@ -229,7 +230,7 @@ make_table1 <- function(df,
 tab1 <- make_table1(
   hivp1_data,
   group_var = hard_drugs_cat_0,   # baseline hard drug use category column after pivot
-  cont_vars = c("BMI_0","age_0"),
+  cont_vars = c("BMI_0","age_0", "LEU3N_0", "logVLOAD_0", "AGG_MENT_0", "AGG_PHYS_0"),
   cat_vars  = c("smoke_cat_0","adh_cat_2","race_cat_0","edu_cat_0")
 )
 
