@@ -95,10 +95,9 @@ fmt_missing <- function(x) {
 # --- main Table 1 function ---
 make_table1 <- function(df,
                         group_var = hard_drugs_cat,
-                        cont_vars = c("income_0","BMI_0","age_0"),
+                        cont_vars = c("BMI_0","age_0"),
                         cat_vars  = c("smoke_cat_0","adh_cat_2","race_cat_0","edu_cat_0"),
                         var_labels = list(
-                          income_0 = "Income (baseline)",
                           BMI_0    = "BMI (baseline)",
                           age_0    = "Age (baseline)",
                           smoke_cat_0 = "Smoking status (baseline)",
@@ -181,8 +180,8 @@ make_table1 <- function(df,
     
     # base rows for each level
     out <- tibble(
-      Variable = c(lab, rep("", length(levs) - 1), "", ""),
-      Level = c(levs, "Missing", "Non-missing N")
+      Variable = c(lab, rep("", length(levs) - 1), ""),
+      Level = c(levs, "Missing")
     )
     
     # Overall column
@@ -192,8 +191,7 @@ make_table1 <- function(df,
         nL <- ifelse(length(nL) == 0, 0, nL)
         fmt_n_pct(nL, denom_overall)
       }),
-      fmt_missing(df[[v]]),
-      as.character(denom_overall)
+      fmt_missing(df[[v]])
     )
     
     # group columns
@@ -207,8 +205,7 @@ make_table1 <- function(df,
           nL <- ifelse(length(nL) == 0, 0, nL)
           fmt_n_pct(nL, denom_g)
         }),
-        fmt_missing(df[[v]][df$.group == g]),
-        as.character(denom_g)
+        fmt_missing(df[[v]][df$.group == g])
       )
     }
     
@@ -232,7 +229,7 @@ make_table1 <- function(df,
 tab1 <- make_table1(
   hivp1_data,
   group_var = hard_drugs_cat_0,   # baseline hard drug use category column after pivot
-  cont_vars = c("income_0","BMI_0","age_0"),
+  cont_vars = c("BMI_0","age_0"),
   cat_vars  = c("smoke_cat_0","adh_cat_2","race_cat_0","edu_cat_0")
 )
 
@@ -241,17 +238,17 @@ colnames(tab1) <- str_replace_all(colnames(tab1), "^No$", "No hard drugs")
 colnames(tab1) <- str_replace_all(colnames(tab1), "^Yes$", "Yes hard drugs")
 
 #code that will be used to knit table1 to pdf from rmarkdown in chunk
-kbl(
+table1 <- kbl(
   tab1,
   format = "latex",
   booktabs = TRUE,
   longtable = TRUE,
   align = "llccc",
-  caption = "Table 1. Baseline characteristics overall and stratified by baseline hard drug use."
+  caption = "Baseline characteristics stratified by baseline hard drug use."
   ,
-  escape = FALSE
-) %>%
-  kable_styling(latex_options = c("hold_position", "repeat_header"), font_size = 9) %>%
+  escape = FALSE,
+  linesep = "") %>%
+  kable_styling(latex_options = c("hold_position", "repeat_header"), font_size = 8) %>%
   column_spec(1, width = "4.0cm") %>%
   column_spec(2, width = "3.0cm") %>%
   column_spec(3:ncol(tab1), width = "2.2cm")
