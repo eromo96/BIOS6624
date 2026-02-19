@@ -91,8 +91,17 @@ fmt_missing <- function(x) {
   p_miss <- mean(is.na(x)) * 100
   sprintf("%d (%.1f\\%%)", n_miss, p_miss)
 }
+#exclude Table 1 missingness row for variables that do not have missingness
+has_missing <- function(x) sum(is.na(x)) > 0
 
-# --- main Table 1 function ---
+# define %||% if you don't already have it
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
+# small helpers for LaTeX formatting
+bold <- function(x) paste0("\\textbf{", x, "}")
+indent <- function(x) paste0("\\hspace{3mm}", x)
+
+# --- main Table 1 function (NO Level column) ---
 make_table1 <- function(df,
                         group_var = hard_drugs_cat,
                         cont_vars = c("BMI_0","age_0", "LEU3N_0", "logVLOAD_0", "AGG_MENT_0", "AGG_PHYS_0"),
@@ -110,7 +119,7 @@ make_table1 <- function(df,
                           AGG_PHYS_0 = "Physical Quality of Life"
                         )) {
   
-  # ensure group is a factor with nice labels
+  # ensure group is a factor
   df <- df %>%
     mutate(.group = as.factor({{ group_var }}))
   
@@ -120,12 +129,14 @@ make_table1 <- function(df,
     filter(!is.na(.group)) %>%
     count(.group, name = "N")
   
+  grp_levels <- levels(df$.group)
+  
   # ---------- continuous summaries ----------
   cont_tbl <- lapply(cont_vars, function(v) {
     lab <- var_labels[[v]] %||% v
     
-    overall_mean_sd   <- fmt_mean_sd(df[[v]])
-    overall_miss      <- fmt_missing(df[[v]])
+    overall_mean_sd <- fmt_mean_sd(df[[v]])
+    overall_miss    <- fmt_missing(df[[v]])
     
     bygrp <- df %>%
       group_by(.group) %>%
@@ -137,18 +148,30 @@ make_table1 <- function(df,
       right_join(n_bygrp, by = ".group") %>%
       arrange(.group)
     
-    # build rows: Mean (SD), Missing
-    out <- tibble(
-      Variable = c(lab, ""),
-      Level = c("Mean (SD)", "Missing"),
-      Overall = c(overall_mean_sd, overall_miss)
-    )
+    show_miss <- has_missing(df[[v]])
     
-    # add each group as columns (No/Yes)
-    for (g in levels(df$.group)) {
+    #build rows
+    var_rows <- c(bold(lab), indent("Mean (SD)"))
+    overall_vals <- c("", overall_mean_sd)
+    for (g in grp_levels) {
       val_mean_sd <- bygrp$mean_sd[bygrp$.group == g]
-      val_miss    <- bygrp$miss[bygrp$.group == g]
-      out[[as.character(g)]] <- c(val_mean_sd, val_miss)
+    }
+    if (show_miss) {
+      var_rows <- c(var_rows, indent("Missing, n (\\%)"))
+      overall_vals <- c(overall_vals, overall_miss)
+    }
+    out <- tibble(
+      Variable = var_rows,
+      Overall = overall_vals
+    )
+    for (g in grp_levels) {
+      val_mean_sd <- bygrp$mean_sd[bygrp$.group == g]
+      col_vals <- c("", val_mean_sd)
+      if (show_miss) {
+        val_miss <- bygrp$miss[bygrp$.group == g]
+        col_vals <- c(col_vals, val_miss)
+      }
+      out[[as.character(g)]] <- col_vals
     }
     
     out
@@ -158,98 +181,100 @@ make_table1 <- function(df,
   cat_tbl <- lapply(cat_vars, function(v) {
     lab <- var_labels[[v]] %||% v
     
-    # denominators for percents: non-missing within each column
     denom_overall <- sum(!is.na(df[[v]]))
     denom_bygrp <- df %>%
       group_by(.group) %>%
       summarise(denom = sum(!is.na(.data[[v]])), .groups = "drop")
     
-    # all levels (excluding NA)
     levs <- df[[v]] %>% as.factor() %>% levels()
     
-    # counts overall
     overall_counts <- df %>%
       filter(!is.na(.data[[v]])) %>%
       count(.data[[v]], name = "n") %>%
       rename(Level = 1)
     
-    # counts by group
     grp_counts <- df %>%
       filter(!is.na(.group)) %>%
       count(.group, .data[[v]], name = "n") %>%
       rename(Level = 2)
     
-    # base rows for each level
-    out <- tibble(
-      Variable = c(lab, rep("", length(levs) - 1), ""),
-      Level = c(levs, "Missing")
-    )
+    show_miss <- has_missing(df[[v]])
     
-    # Overall column
-    out$Overall <- c(
+    #rows (header and levels [+missing])
+    var_rows <- c(bold(lab), indent(levs))
+    overall_vals <- c(
+      "",
       sapply(levs, function(L) {
         nL <- overall_counts$n[overall_counts$Level == L]
         nL <- ifelse(length(nL) == 0, 0, nL)
         fmt_n_pct(nL, denom_overall)
-      }),
-      fmt_missing(df[[v]])
+      })
     )
-    
-    # group columns
-    for (g in levels(df$.group)) {
+    if (show_miss) {
+      var_rows <- c(var_rows, indent("Missing, n (\\%)"))
+      overall_vals <- c(overall_vals, fmt_missing(df[[v]]))
+    }
+    out <- tibble(
+      Variable = var_rows,
+      Overall  = overall_vals
+    )
+    for (g in grp_levels) {
       denom_g <- denom_bygrp$denom[denom_bygrp$.group == g]
       denom_g <- ifelse(length(denom_g) == 0, NA_integer_, denom_g)
       
-      out[[as.character(g)]] <- c(
+      col_vals <- c(
+        "",
         sapply(levs, function(L) {
           nL <- grp_counts$n[grp_counts$.group == g & grp_counts$Level == L]
           nL <- ifelse(length(nL) == 0, 0, nL)
           fmt_n_pct(nL, denom_g)
-        }),
-        fmt_missing(df[[v]][df$.group == g])
+        })
       )
+      
+      if (show_miss) {
+        col_vals <- c(col_vals, fmt_missing(df[[v]][df$.group == g]))
+      }
+      
+      out[[as.character(g)]] <- col_vals
     }
     
     out
   }) %>% bind_rows()
   
-  # ---------- sample size row ----------
+  
+  # ---------- sample size (nested like you want) ----------
   Ns <- tibble(
-    Variable = "Sample size",
-    Level = "N",
-    Overall = as.character(n_overall)
+    Variable = c(bold("Sample size"), indent("N")),
+    Overall  = c("", as.character(n_overall))
   )
-  for (g in levels(df$.group)) {
-    Ns[[as.character(g)]] <- as.character(sum(df$.group == g, na.rm = TRUE))
+  for (g in grp_levels) {
+    Ns[[as.character(g)]] <- c("", as.character(sum(df$.group == g, na.rm = TRUE)))
   }
   
-  # combine
   bind_rows(Ns, cont_tbl, cat_tbl)
 }
 
 tab1 <- make_table1(
   hivp1_data,
-  group_var = hard_drugs_cat_0,   # baseline hard drug use category column after pivot
+  group_var = hard_drugs_cat_0,
   cont_vars = c("BMI_0","age_0", "LEU3N_0", "logVLOAD_0", "AGG_MENT_0", "AGG_PHYS_0"),
   cat_vars  = c("smoke_cat_0","adh_cat_2","race_cat_0","edu_cat_0")
 )
 
-# Nice column names
-colnames(tab1) <- str_replace_all(colnames(tab1), "^No$", "No hard drugs")
+colnames(tab1) <- str_replace_all(colnames(tab1), "^No$",  "No hard drugs")
 colnames(tab1) <- str_replace_all(colnames(tab1), "^Yes$", "Yes hard drugs")
 
-#code that will be used to knit table1 to pdf from rmarkdown in chunk
+# dynamic alignment: 1 left + rest centered
+align_vec <- paste0("l", paste(rep("c", ncol(tab1) - 1), collapse = ""))
+
 table1 <- kbl(
   tab1,
   format = "latex",
   booktabs = TRUE,
   longtable = TRUE,
-  align = "llccc",
-  caption = "Baseline characteristics stratified by baseline hard drug use."
-  ,
+  align = align_vec,
+  caption = "Baseline characteristics stratified by baseline hard drug use.",
   escape = FALSE,
-  linesep = "") %>%
-  kable_styling(latex_options = c("hold_position", "repeat_header"), font_size = 8) %>%
-  column_spec(1, width = "4.0cm") %>%
-  column_spec(2, width = "3.0cm") %>%
-  column_spec(3:ncol(tab1), width = "2.2cm")
+  linesep = ""
+) %>%
+  kable_styling(latex_options = c("hold_position", "repeat_header", "scale_down"), font_size = 8) 
