@@ -2,6 +2,7 @@
 library(knitr)
 library(kableExtra)
 library(stringr)
+library(tidyverse)
 #read in code form cleaning script so that we dont have to redo data cleaning here
 source("./Project1/Code/Cleaning.R")
 
@@ -68,10 +69,25 @@ kbl(miss_tbl, format="latex", booktabs=TRUE, digits=1,
     escape=FALSE) %>%
   kable_styling(latex_options=c("hold_position"))
 
+#summarise missingness of each outcome by hard drug use to check whether MAR
+miss_out <- hivp1_data %>%
+  group_by(hard_drugs_0) %>%
+  summarise(
+    ment_miss = mean(is.na(d_AGG_MENT)),
+    phy_miss = mean(is.na(d_AGG_PHYS)),
+    leu3n_miss = mean(is.na(d_LEU3N)),
+    vload_miss = mean(is.na(r_logVLOAD))
+  )
+
 #exclude observations that have missing values for outcomes for the descriptive
-#summaries and analysis
+#summaries and analysis to do complete case analysis because we found
+#missingness of outcome to be MAR after stratifying missingness by hard drug use above
 hivp1_data <- hivp1_data %>%
   drop_na(d_AGG_MENT, d_AGG_PHYS, d_LEU3N, r_logVLOAD)
+
+#save analysis dataset
+write_csv(hivp1_data, "./Project1/Data/hiv_andata.csv")
+
 
 ### ---- code for creating table 1 --------
 # --- helper functions ---
