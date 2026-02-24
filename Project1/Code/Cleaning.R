@@ -35,20 +35,21 @@ hiv_data <- hiv_data %>%
 #create labelled versions of categorical variables
 hiv_data <- hiv_data %>%
   mutate(
-    smoke_cat = factor(
-      SMOKE,
-      levels = c(1, 2, 3),
-      labels = c("Never smoked",
-                 "Former smoker",
+    smoke_cat = factor(case_when(
+      SMOKE %in% c(1,2) ~ 1,
+      SMOKE == 3 ~ 2
+    ),
+      levels = c(1, 2),
+      labels = c("Not current smoker",
                  "Current smoker")
     ),
-    adh_cat = factor(
-      ADH,
-      levels = c(1, 2, 3, 4),
-      labels = c("100%",
-                 "95-99%",
-                 "75-94%",
-                 "<75%")
+    adh_cat = factor(case_when(
+      ADH %in% c(1, 2) ~ 1,
+      ADH %in% c(3, 4) ~ 2
+    ),
+      levels = c(1, 2),
+      labels = c(">= 95% Adherence",
+                 "< 95% Adherence")
     ),
     hard_drugs_cat = factor(
       hard_drugs,
