@@ -270,7 +270,7 @@ build_main_table <- function(outcomes, formulas_no_adh, lm_fits, brms_fits,
     # LOOIC via brms::add_criterion (cached in saved brmsfit)
     loo_full <- looic_cached_brm(
       brm_fit,
-      file_name = paste0(y, "_no_adh"),     # saves brms_y_no_adh.rds with loo inside
+      file_name = paste0(y, "_no_adh"),     
       models_dir = models_dir,
       reloo = reloo
     )
@@ -321,10 +321,6 @@ build_secondary_table <- function(outcomes, lm_fits,
                                   reloo = FALSE) {
   
   tab <- purrr::map_dfr(outcomes, function(y) {
-    
-    # -------------------------
-    # Frequentist: pull hard drug term from WITH-ADH model
-    # -------------------------
     lm_with <- lm_fits[[paste0(y, "_with_adh")]]
     hd_term_with <- find_lm_term(lm_with, "^hard_drugs_cat_0")
     lm_row_with  <- lm_term_stats(lm_with, term = hd_term_with)
@@ -335,10 +331,6 @@ build_secondary_table <- function(outcomes, lm_fits,
     lm_row_no  <- lm_term_stats(lm_no, term = hd_term_no)
     
     delta_beta_f <- lm_row_with$est_f - lm_row_no$est_f
-    
-    # -------------------------
-    # Bayesian: pull hard drug coef from WITH-ADH model
-    # -------------------------
     brm_with <- brms_fits[[paste0(y, "_with_adh")]]
     b_row_with <- brms_coef_stats(
       brm_with,
@@ -357,11 +349,6 @@ build_secondary_table <- function(outcomes, lm_fits,
     )
     
     delta_beta_b <- b_row_with$est_b - b_row_no$est_b
-    
-    # -------------------------
-    # ΔLOOIC comparing WITH-ADH (full) vs NO-ADH (reduced comparator)
-    # Your column is "red - full" = no_adh - with_adh
-    # -------------------------
     loo_full <- looic_cached_brm(
       brm_with,
       file_name = paste0(y, "_with_adh"),
@@ -450,8 +437,6 @@ kbl(secondary_tbl_fmt, booktabs = TRUE,
 
 
 #### model diagnostics
-bm_mentnoadh <- brms_fits[["d_AGG_MENT_no_adh"]]
-summary(bm_mentnoadh)
 
 #make diagnostic checking more efficient using loop
 for (nm in names(brms_fits)) {
