@@ -12,8 +12,8 @@ unique(hiv_data$EDUCBAS)
 hiv_data <- hiv_data %>%
   mutate(
     race_cat = factor(case_when(
-      RACE %in% c(1, 2) ~ 1,
-      RACE %in% c(3, 4, 7, 8) ~ 2
+      RACE %in% c(1) ~ 1,
+      RACE %in% c(2, 3, 4, 7, 8) ~ 2
     ),
   levels = c(1, 2), labels = c("White", "Other")))
 #collapse education variable to College Degree+ vs Non College Degree

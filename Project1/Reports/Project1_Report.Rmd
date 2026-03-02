@@ -1,0 +1,905 @@
+---
+title: "Project1: Interim Data Analysis Plan"
+author: "Eduardo Romo"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    number_sections: false
+    toc: false
+fontsize: 12pt
+geometry: margin=1in
+header-includes:
+  - \usepackage{setspace}
+  - \doublespacing
+  - \usepackage{float}
+  - \usepackage{graphicx}
+  - \floatplacement{figure}{H}
+  - \floatplacement{table}{H}
+  - \setlength{\parindent}{2em}
+  - \setlength{\parskip}{0pt}
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 6.5, fig.height = 4.5
+)
+library(rstan)
+library(cmdstanr)
+library(parallel)
+library(brms)
+library(posterior)
+library(bayestestR)
+library(loo)
+library(broom)
+library(stringr)
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+
+#read in data
+hiv_data <- read_csv("../Data/hiv_6624_final.csv") %>%
+  select(-`...1`)
+
+#see unique race and education levels in data to see which labels are needed
+unique(hiv_data$RACE)
+unique(hiv_data$EDUCBAS)
+
+#collapse race variable to White vs Other
+hiv_data <- hiv_data %>%
+  mutate(
+    race_cat = factor(case_when(
+      RACE %in% c(1) ~ 1,
+      RACE %in% c(2, 3, 4, 7, 8) ~ 2
+    ),
+  levels = c(1, 2), labels = c("White", "Other")))
+#collapse education variable to College Degree+ vs Non College Degree
+hiv_data <- hiv_data %>%
+  mutate(
+    edu_cat = factor(case_when(
+      EDUCBAS %in% c(1, 2, 3, 4) ~ 1,
+      EDUCBAS %in% c(5, 6, 7) ~ 2
+    ),
+    levels = c(1, 2), labels = c("No College Degree", "College Degree")
+    )
+  )
+
+#recode abnormal BMI values so that they are missing/NAs
+hiv_data <- hiv_data %>%
+  mutate(
+    BMI = if_else(BMI <= 0 | BMI > 250, NA_real_, BMI)
+  )
+#create labelled versions of categorical variables
+hiv_data <- hiv_data %>%
+  mutate(
+    smoke_cat = factor(case_when(
+      SMOKE %in% c(1,2) ~ 1,
+      SMOKE == 3 ~ 2
+    ),
+      levels = c(1, 2),
+      labels = c("Not current smoker",
+                 "Current smoker")
+    ),
+    adh_cat = factor(case_when(
+      ADH %in% c(1, 2) ~ 1,
+      ADH %in% c(3, 4) ~ 2
+    ),
+      levels = c(1, 2),
+      labels = c(">= 95\\% Adherence",
+                 "< 95\\% Adherence")
+    ),
+    hard_drugs_cat = factor(
+      hard_drugs,
+      levels = c(0, 1),
+      labels = c("No",
+                 "Yes")
+    )
+  )
+
+#create analysis dataset
+hivp1_data <- hiv_data %>%
+  #keep only baseline and year 2 measurements
+  filter(years %in% c(0,2)) %>%
+  #keep only the columns we need
+  #covariates will become *_0 and *_2 after pivoting
+  pivot_wider(
+    id_cols = newid,
+    names_from = years,
+    values_from = c(AGG_MENT, AGG_PHYS, LEU3N, VLOAD, income, BMI, SMOKE, smoke_cat,
+                    ADH, adh_cat, RACE, race_cat, EDUCBAS, edu_cat, age, hard_drugs,
+                    hard_drugs_cat),
+    names_sep = "_"
+  ) %>%
+  #compute year2 - baseline diffs for outcomes
+  mutate(
+    d_AGG_MENT = AGG_MENT_2 - AGG_MENT_0,
+    d_AGG_PHYS = AGG_PHYS_2 - AGG_PHYS_0,
+    d_LEU3N = LEU3N_2 - LEU3N_0,
+    d_VLOAD = VLOAD_2 - VLOAD_0
+  ) %>%
+  select(newid, ends_with("_0"), ends_with("_2"), starts_with("d_"))
+
+
+# try log10 transformation of ratio of VLOAD_2 and VLOAD_0
+hivp1_data <- hivp1_data %>%
+  mutate(
+    r_logVLOAD = log10(VLOAD_2/VLOAD_0),
+    logVLOAD_0 = log10(VLOAD_0)
+  )
+
+
+
+#summarise missingness of each outcome by hard drug use to check whether MAR
+miss_out <- hivp1_data %>%
+  group_by(hard_drugs_0) %>%
+  summarise(
+    ment_miss = mean(is.na(d_AGG_MENT)),
+    phy_miss = mean(is.na(d_AGG_PHYS)),
+    leu3n_miss = mean(is.na(d_LEU3N)),
+    vload_miss = mean(is.na(r_logVLOAD))
+  )
+
+#exclude observations that have missing values for outcomes for the descriptive
+#summaries and analysis to do complete case analysis because we found
+#missingness of outcome to be MAR after stratifying missingness by hard drug use above
+hiv_andata <- hivp1_data %>%
+  drop_na(d_AGG_MENT, d_AGG_PHYS, d_LEU3N, r_logVLOAD)
+
+
+### ---- code for creating table 1 --------
+# --- helper functions ---
+fmt_n_pct <- function(n, denom) {
+  if (is.na(n) | is.na(denom) | denom == 0) return(NA_character_)
+  sprintf("%d (%.1f\\%%)", n, 100 * n / denom)
+}
+
+fmt_mean_sd <- function(x) {
+  x <- x[!is.na(x)]
+  if (length(x) == 0) return(NA_character_)
+  sprintf("%.1f (%.1f)", mean(x), sd(x))
+}
+
+fmt_missing <- function(x) {
+  n_miss <- sum(is.na(x))
+  p_miss <- mean(is.na(x)) * 100
+  sprintf("%d (%.1f\\%%)", n_miss, p_miss)
+}
+#exclude Table 1 missingness row for variables that do not have missingness
+has_missing <- function(x) sum(is.na(x)) > 0
+
+# define %||% if you don't already have it
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
+# small helpers for LaTeX formatting
+bold <- function(x) paste0("\\textbf{", x, "}")
+indent <- function(x) paste0("\\hspace{3mm}", x)
+
+# --- main Table 1 function (NO Level column) ---
+make_table1 <- function(df,
+                        group_var = hard_drugs_cat,
+                        cont_vars = c("BMI_0","age_0", "LEU3N_0", "logVLOAD_0", "AGG_MENT_0", "AGG_PHYS_0"),
+                        cat_vars  = c("smoke_cat_0","adh_cat_2","race_cat_0","edu_cat_0"),
+                        var_labels = list(
+                          BMI_0    = "BMI",
+                          age_0    = "Age",
+                          smoke_cat_0 = "Smoking status",
+                          adh_cat_2   = "Adherence category (year 2)",
+                          race_cat_0  = "Race/ethnicity",
+                          edu_cat_0   = "Education",
+                          LEU3N_0 = "CD4+ Count",
+                          logVLOAD_0 = "Log Viral Load",
+                          AGG_MENT_0 = "Mental Quality of Life",
+                          AGG_PHYS_0 = "Physical Quality of Life"
+                        )) {
+  
+  # ensure group is a factor
+  df <- df %>%
+    mutate(.group = as.factor({{ group_var }}))
+  
+  # group counts (non-missing group)
+  n_overall <- nrow(df)
+  n_bygrp <- df %>%
+    filter(!is.na(.group)) %>%
+    count(.group, name = "N")
+  
+  grp_levels <- levels(df$.group)
+  
+  # ---------- continuous summaries ----------
+  cont_tbl <- lapply(cont_vars, function(v) {
+    lab <- var_labels[[v]] %||% v
+    
+    overall_mean_sd <- fmt_mean_sd(df[[v]])
+    overall_miss    <- fmt_missing(df[[v]])
+    
+    bygrp <- df %>%
+      group_by(.group) %>%
+      summarise(
+        mean_sd = fmt_mean_sd(.data[[v]]),
+        miss    = fmt_missing(.data[[v]]),
+        .groups = "drop"
+      ) %>%
+      right_join(n_bygrp, by = ".group") %>%
+      arrange(.group)
+    
+    show_miss <- has_missing(df[[v]])
+    
+    #build rows
+    var_rows <- c(bold(lab), indent("Mean (SD)"))
+    overall_vals <- c("", overall_mean_sd)
+    for (g in grp_levels) {
+      val_mean_sd <- bygrp$mean_sd[bygrp$.group == g]
+    }
+    if (show_miss) {
+      var_rows <- c(var_rows, indent("Missing, n (\\%)"))
+      overall_vals <- c(overall_vals, overall_miss)
+    }
+    out <- tibble(
+      Variable = var_rows,
+      Overall = overall_vals
+    )
+    for (g in grp_levels) {
+      val_mean_sd <- bygrp$mean_sd[bygrp$.group == g]
+      col_vals <- c("", val_mean_sd)
+      if (show_miss) {
+        val_miss <- bygrp$miss[bygrp$.group == g]
+        col_vals <- c(col_vals, val_miss)
+      }
+      out[[as.character(g)]] <- col_vals
+    }
+    
+    out
+  }) %>% bind_rows()
+  
+  # ---------- categorical summaries ----------
+  cat_tbl <- lapply(cat_vars, function(v) {
+    lab <- var_labels[[v]] %||% v
+    
+    denom_overall <- sum(!is.na(df[[v]]))
+    denom_bygrp <- df %>%
+      group_by(.group) %>%
+      summarise(denom = sum(!is.na(.data[[v]])), .groups = "drop")
+    
+    levs <- df[[v]] %>% as.factor() %>% levels()
+    
+    overall_counts <- df %>%
+      filter(!is.na(.data[[v]])) %>%
+      count(.data[[v]], name = "n") %>%
+      rename(Level = 1)
+    
+    grp_counts <- df %>%
+      filter(!is.na(.group)) %>%
+      count(.group, .data[[v]], name = "n") %>%
+      rename(Level = 2)
+    
+    show_miss <- has_missing(df[[v]])
+    
+    #rows (header and levels [+missing])
+    var_rows <- c(bold(lab), indent(levs))
+    overall_vals <- c(
+      "",
+      sapply(levs, function(L) {
+        nL <- overall_counts$n[overall_counts$Level == L]
+        nL <- ifelse(length(nL) == 0, 0, nL)
+        fmt_n_pct(nL, denom_overall)
+      })
+    )
+    if (show_miss) {
+      var_rows <- c(var_rows, indent("Missing, n (\\%)"))
+      overall_vals <- c(overall_vals, fmt_missing(df[[v]]))
+    }
+    out <- tibble(
+      Variable = var_rows,
+      Overall  = overall_vals
+    )
+    for (g in grp_levels) {
+      denom_g <- denom_bygrp$denom[denom_bygrp$.group == g]
+      denom_g <- ifelse(length(denom_g) == 0, NA_integer_, denom_g)
+      
+      col_vals <- c(
+        "",
+        sapply(levs, function(L) {
+          nL <- grp_counts$n[grp_counts$.group == g & grp_counts$Level == L]
+          nL <- ifelse(length(nL) == 0, 0, nL)
+          fmt_n_pct(nL, denom_g)
+        })
+      )
+      
+      if (show_miss) {
+        col_vals <- c(col_vals, fmt_missing(df[[v]][df$.group == g]))
+      }
+      
+      out[[as.character(g)]] <- col_vals
+    }
+    
+    out
+  }) %>% bind_rows()
+  
+  
+  # ---------- sample size (nested like you want) ----------
+  Ns <- tibble(
+    Variable = c(bold("Sample size"), indent("N")),
+    Overall  = c("", as.character(n_overall))
+  )
+  for (g in grp_levels) {
+    Ns[[as.character(g)]] <- c("", as.character(sum(df$.group == g, na.rm = TRUE)))
+  }
+  
+  bind_rows(Ns, cont_tbl, cat_tbl)
+}
+
+tab1 <- make_table1(
+  hiv_andata,
+  group_var = hard_drugs_cat_0,
+  cont_vars = c("BMI_0","age_0", "LEU3N_0", "logVLOAD_0", "AGG_MENT_0", "AGG_PHYS_0"),
+  cat_vars  = c("smoke_cat_0","adh_cat_2","race_cat_0","edu_cat_0")
+)
+
+colnames(tab1) <- str_replace_all(colnames(tab1), "^No$",  "No hard drugs")
+colnames(tab1) <- str_replace_all(colnames(tab1), "^Yes$", "Yes hard drugs")
+
+# dynamic alignment: 1 left + rest centered
+align_vec <- paste0("l", paste(rep("c", ncol(tab1) - 1), collapse = ""))
+
+table1 <- kbl(
+  tab1,
+  format = "latex",
+  booktabs = TRUE,
+  longtable = TRUE,
+  align = align_vec,
+  caption = "Baseline characteristics stratified by baseline hard drug use.",
+  escape = FALSE,
+  linesep = ""
+) %>%
+  kable_styling(latex_options = c("hold_position", "repeat_header", "scale_down"), font_size = 8) 
+
+hiv_andata <- hiv_andata %>%
+  mutate(
+    hard_drugs_cat_0 = factor(hard_drugs_cat_0),
+    smoke_cat_0      = factor(smoke_cat_0),
+    edu_cat_0        = factor(edu_cat_0),
+    race_cat_0       = factor(race_cat_0),
+    adh_cat_2        = factor(adh_cat_2)
+  )
+#set default priors for models but will need to specify different prior for d_LEU3N and r_logVLOAD
+default_priors <- c(
+  prior(normal(0, 100), class = "Intercept"),
+  prior(normal(0, 100), class = "b"),
+  prior(normal(0, 100), class = "sigma", lb = 0)
+)
+
+#create function that sets the same non-informative priors across models, saves model to "Models" folder, and runs model
+run_brm <- function(formula, data, file_name, family = gaussian(), priors = default_priors,
+                    iter = 20000, warmup = 5000, chains = 4, cores = min(4, parallel::detectCores()),
+                    seed = 6624, adapt_delta = 0.95, max_treedepth = 12, models_dir = "../Models",
+                    force_refit = FALSE){
+  file_path <- file.path(models_dir, paste0("brms_", file_name, ".rds"))
+  if (file.exists(file_path) && !force_refit) {
+    message("Reading cached model: ", file_path)
+    return(readRDS(file_path))
+  }
+  message("Fitting model: ", deparse(formula), "\nSaving to: ", file_path)
+  
+  fit <- brm(formula = formula, data = data, family = family, prior = priors, backend = "cmdstanr",
+             iter = iter, warmup = warmup, chains = chains, cores = cores, seed = seed,
+             control = list(adapt_delta = adapt_delta, max_treedepth = max_treedepth),
+             save_pars = save_pars(all = TRUE))
+  
+  saveRDS(fit, file_path)
+  fit
+}
+
+#non adherence model formulas
+formulas_no_adh <- list(
+  d_AGG_MENT = d_AGG_MENT ~ hard_drugs_cat_0 + AGG_MENT_0 + age_0 + BMI_0 + smoke_cat_0 + edu_cat_0 + race_cat_0,
+  d_AGG_PHYS = d_AGG_PHYS ~ hard_drugs_cat_0 + AGG_PHYS_0 + age_0 + BMI_0 + smoke_cat_0 + edu_cat_0 + race_cat_0,
+  d_LEU3N = d_LEU3N ~ hard_drugs_cat_0 + LEU3N_0 + age_0 + BMI_0 + smoke_cat_0 + edu_cat_0 + race_cat_0,
+  r_logVLOAD = r_logVLOAD ~ hard_drugs_cat_0 + logVLOAD_0 + age_0 + BMI_0 + smoke_cat_0 + edu_cat_0 + race_cat_0
+)
+#adherence model formulas
+formulas_with_adh <- list(
+  d_AGG_MENT = update(formulas_no_adh$d_AGG_MENT, . ~ . + adh_cat_2),
+  d_AGG_PHYS = update(formulas_no_adh$d_AGG_PHYS, . ~ . + adh_cat_2),
+  d_LEU3N = update(formulas_no_adh$d_LEU3N, . ~ . + adh_cat_2),
+  r_logVLOAD = update(formulas_no_adh$r_logVLOAD, . ~ . + adh_cat_2)
+)
+
+#initialize list that will store brms fits
+brms_fits <- list()
+
+#loop through each formula and run our personalized brms function
+for(mods in names(formulas_no_adh)) {
+  brms_fits[[paste0(mods, "_no_adh")]] <- 
+    run_brm(formula = formulas_no_adh[[mods]], data = hiv_andata, file_name = paste0(mods, "_no_adh"))
+  brms_fits[[paste0(mods, "_with_adh")]] <- 
+    run_brm(formula = formulas_with_adh[[mods]], data = hiv_andata, file_name = paste0(mods, "_with_adh"))
+}
+
+
+#function that runs linear regression and saves model output to models folder
+run_lm <- function(formula, data, file_name, models_dir = "../Models",
+                   force_refit = FALSE) {
+  file_path <- file.path(models_dir, paste0("lm_", file_name, ".rds"))
+  if (file.exists(file_path) && !force_refit) {
+    message("Reading cached lm: ", file_path)
+    return(readRDS(file_path))
+  }
+  message("Fitting lm: ", deparse(formula), "\nSaving to: ", file_path)
+  fit <- lm(formula = formula, data = data)
+  saveRDS(fit, file_path)
+  fit
+}
+
+#initialize list for lm fits
+lm_fits <- list()
+
+#loop through each formula and run our personalized lm function
+for(mods in names(formulas_no_adh)) {
+  lm_fits[[paste0(mods, "_no_adh")]] <- 
+    run_lm(formula = formulas_no_adh[[mods]], data = hiv_andata, file_name = paste0(mods, "_no_adh"))
+  lm_fits[[paste0(mods, "_with_adh")]] <- 
+    run_lm(formula = formulas_with_adh[[mods]], data = hiv_andata, file_name = paste0(mods, "_with_adh"))
+}
+# clinically meaningful thresholds
+clin_thresh <- c(
+  d_AGG_MENT = 2,
+  d_AGG_PHYS = 2,
+  d_LEU3N = 50,
+  r_logVLOAD = 0.5
+)
+
+#create nice outcome labels for tables
+outcome_labs <- function(x) {
+  recode(x,
+         d_AGG_MENT = "Δ AGG_MENT",
+         d_AGG_PHYS = "Δ AGG_PHYS",
+         d_LEU3N    = "Δ CD4 (LEU3N)",
+         r_logVLOAD = "log10(VLOAD2/VLOAD0)")
+}
+
+#loo helper function
+looic_cached_brm <- function(fit,
+                             file_name,
+                             models_dir = "../Models",
+                             reloo = FALSE,
+                             force_refit = FALSE) {
+  
+  dir.create(models_dir, showWarnings = FALSE, recursive = TRUE)
+  file_path <- file.path(models_dir, paste0("brms_", file_name, ".rds"))
+  
+  # If we already have a saved brmsfit with loo criterion added, reuse it
+  if (file.exists(file_path) && !force_refit) {
+    fit2 <- readRDS(file_path)
+    if (!is.null(fit2$criteria$loo)) {
+      loo <- fit2$criteria$loo
+      looic <- loo$estimates["looic", "Estimate"]
+      looic_se <- loo$estimates["looic", "SE"]
+      return(list(looic = looic, looic_se = looic_se, fit = fit2))
+    }
+    # else: fall through and add criterion below
+    fit <- fit2
+  }
+  
+  # Add criterion using brms (uses log_lik; does NOT require rstan)
+  fit2 <- brms::add_criterion(fit, "loo", reloo = reloo)
+  
+  # Save updated fit so you never recompute LOO again
+  saveRDS(fit2, file_path)
+  
+  loo <- fit2$criteria$loo
+  looic <- loo$estimates["looic", "Estimate"]
+  looic_se <- loo$estimates["looic", "SE"]
+  
+  list(looic = looic, looic_se = looic_se, fit = fit2)
+}
+
+delta_looic_vals <- function(looic_full, looic_red) {
+  looic_red - looic_full
+}
+
+#extract frequentist model output
+lm_term_stats <- function(fit, term) {
+  
+  sm <- summary(fit)
+  coefs <- sm$coefficients
+  
+  if (!term %in% rownames(coefs)) {
+    stop("Term not found in summary(fit): ", term,
+         "\nAvailable: ", paste(rownames(coefs), collapse = ", "))
+  }
+  
+  est <- coefs[term, "Estimate"]
+  se  <- coefs[term, "Std. Error"]
+  p   <- coefs[term, "Pr(>|t|)"]
+  
+  ci <- confint(fit, parm = term)
+  
+  tibble::tibble(
+    est_f = est,
+    se_f  = se,
+    l95_f = ci[1],
+    u95_f = ci[2],
+    p_f   = p
+  )
+}
+
+#find the unique coefficient term in lm() by pattern
+find_lm_term <- function(fit, pattern) {
+  trms <- names(coef(fit))
+  hit <- grep(pattern, trms, value = TRUE)
+  if (length(hit) != 1) stop ("Pattern matched ", length(hit), " terms: ", paste(hit, collapse = ", "))
+  hit
+}
+
+#extract bayesian coefficient stats
+brms_coef_stats <- function(fit, coef_regex, clin_thresh,
+                            include_mcse = FALSE) {
+  coef_names <- rownames(brms::fixef(fit))
+  hit <- grep(coef_regex, coef_names, value = TRUE)
+  
+  if (length(hit) != 1) {
+    stop("Coefficient regex matched ", length(hit), " terms. Regex=", coef_regex,
+         "\nMatches: ", paste(hit, collapse = ", "))
+  }
+  
+  coef_name <- hit
+  draws <- posterior::as_draws_df(fit)
+  colname <- paste0("b_", coef_name)
+  if (!colname %in% names(draws)) stop("Posterior draw column not found: ", colname)
+  
+  b <- draws[[colname]]
+  
+  est <- mean(b)
+  sd  <- sd(b)
+  
+  h <- bayestestR::hdi(b, ci = 0.95, method = "HPD")
+  
+  # Keep ONE clinically meaningful posterior probability:
+  p_abs <- mean(abs(b) > clin_thresh)
+  
+  mcse <- if (include_mcse) posterior::mcse_mean(posterior::as_draws_vector(b)) else NA_real_
+  
+  tibble::tibble(
+    est_b = est,
+    sd_b  = sd,
+    mcse_b = mcse,
+    l95_b = h$CI_low,
+    u95_b = h$CI_high,
+    pr_abs_gt_clin = p_abs
+  )
+}
+
+#function to create table for main analysis (effect of hard drug use on treatment effect)
+build_main_table <- function(outcomes, formulas_no_adh, lm_fits, brms_fits,
+                             run_brm, hiv_andata,
+                             models_dir = "../Models",
+                             include_mcse = FALSE,
+                             reloo = FALSE) {
+  
+  # reduced models without hard drugs
+  formulas_no_drugs <- lapply(formulas_no_adh, function(f) update(f, . ~ . - hard_drugs_cat_0))
+  brms_red <- list()
+  
+  for (y in outcomes) {
+    brms_red[[y]] <- run_brm(
+      formula = formulas_no_drugs[[y]],
+      data = hiv_andata,
+      file_name = paste0(y, "_no_adh_no_drugs"),
+      models_dir = models_dir
+    )
+  }
+  
+  tab <- purrr::map_dfr(outcomes, function(y) {
+    
+    # Frequentist (no-adh)
+    lm_fit <- lm_fits[[paste0(y, "_no_adh")]]
+    hd_term <- find_lm_term(lm_fit, "^hard_drugs_cat_0")
+    lm_row  <- lm_term_stats(lm_fit, term = hd_term)
+    
+    # Bayesian (no-adh)
+    brm_fit <- brms_fits[[paste0(y, "_no_adh")]]
+    b_row <- brms_coef_stats(
+      brm_fit,
+      coef_regex = "^hard_drugs_cat_0",
+      clin_thresh = clin_thresh[[y]],
+      include_mcse = include_mcse
+    )
+    
+    # LOOIC via brms::add_criterion (cached in saved brmsfit)
+    loo_full <- looic_cached_brm(
+      brm_fit,
+      file_name = paste0(y, "_no_adh"),     # saves brms_y_no_adh.rds with loo inside
+      models_dir = models_dir,
+      reloo = reloo
+    )
+    
+    loo_red <- looic_cached_brm(
+      brms_red[[y]],
+      file_name = paste0(y, "_no_adh_no_drugs"),
+      models_dir = models_dir,
+      reloo = reloo
+    )
+    
+    tibble::tibble(
+      outcome = y,
+      delta_looic_red_minus_full = delta_looic_vals(loo_full$looic, loo_red$looic)
+    ) %>%
+      dplyr::bind_cols(lm_row, b_row)
+  })
+  
+  tab_fmt <- tab %>%
+  dplyr::mutate(
+    Outcome = outcome_labs(outcome),
+
+    `Estimate (SE)` = sprintf("%.2f (%.2f)", est_f, se_f),
+    `95% CI`        = sprintf("[%.2f, %.2f]", l95_f, u95_f),
+    `p-value`       = format.pval(p_f, digits = 3, eps = 0.001),
+
+    `Post. mean (SD)` = sprintf("%.2f (%.2f)", est_b, sd_b),
+    `95% HPDI`         = sprintf("[%.2f, %.2f]", l95_b, u95_b),
+    `Pr(|β| > clin)`   = sprintf("%.3f", pr_abs_gt_clin),
+
+    `ΔLOOIC (red-full)` = sprintf("%.1f", delta_looic_red_minus_full)
+  ) %>%
+  dplyr::select(
+    Outcome,
+    `Estimate (SE)`, `95% CI`, `p-value`,
+    `Post. mean (SD)`, `95% HPDI`, `Pr(|β| > clin)`,
+    `ΔLOOIC (red-full)`
+  )
+  
+  tab_fmt
+}
+
+#function for secondary analysis table ("mediation")
+build_secondary_table <- function(outcomes, lm_fits,
+                                  models_dir = "../Models",
+                                  brms_fits = brms_fits,
+                                  include_mcse = FALSE,
+                                  reloo = FALSE) {
+  
+  tab <- purrr::map_dfr(outcomes, function(y) {
+    
+    # -------------------------
+    # Frequentist: pull hard drug term from WITH-ADH model
+    # -------------------------
+    lm_with <- lm_fits[[paste0(y, "_with_adh")]]
+    hd_term_with <- find_lm_term(lm_with, "^hard_drugs_cat_0")
+    lm_row_with  <- lm_term_stats(lm_with, term = hd_term_with)
+    
+    # Also grab hard drug estimate from NO-ADH model to compute change in coef
+    lm_no <- lm_fits[[paste0(y, "_no_adh")]]
+    hd_term_no <- find_lm_term(lm_no, "^hard_drugs_cat_0")
+    lm_row_no  <- lm_term_stats(lm_no, term = hd_term_no)
+    
+    delta_beta_f <- lm_row_with$est_f - lm_row_no$est_f
+    
+    # -------------------------
+    # Bayesian: pull hard drug coef from WITH-ADH model
+    # -------------------------
+    brm_with <- brms_fits[[paste0(y, "_with_adh")]]
+    b_row_with <- brms_coef_stats(
+      brm_with,
+      coef_regex  = "^hard_drugs_cat_0",
+      clin_thresh = clin_thresh[[y]],
+      include_mcse = include_mcse
+    )
+    
+    # Also compute Bayesian change in posterior mean (with_adh - no_adh)
+    brm_no <- brms_fits[[paste0(y, "_no_adh")]]
+    b_row_no <- brms_coef_stats(
+      brm_no,
+      coef_regex  = "^hard_drugs_cat_0",
+      clin_thresh = clin_thresh[[y]],
+      include_mcse = include_mcse
+    )
+    
+    delta_beta_b <- b_row_with$est_b - b_row_no$est_b
+    
+    # -------------------------
+    # ΔLOOIC comparing WITH-ADH (full) vs NO-ADH (reduced comparator)
+    # Your column is "red - full" = no_adh - with_adh
+    # -------------------------
+    loo_full <- looic_cached_brm(
+      brm_with,
+      file_name = paste0(y, "_with_adh"),
+      models_dir = models_dir,
+      reloo = reloo
+    )
+    
+    loo_red <- looic_cached_brm(
+      brm_no,
+      file_name = paste0(y, "_no_adh"),
+      models_dir = models_dir,
+      reloo = reloo
+    )
+    
+    tibble::tibble(
+      outcome = y,
+      delta_beta_f = delta_beta_f,
+      delta_beta_b = delta_beta_b,
+      delta_looic_red_minus_full = delta_looic_vals(loo_full$looic, loo_red$looic)
+    ) %>%
+      dplyr::bind_cols(lm_row_with, b_row_with)
+  })
+  
+  tab_fmt <- tab %>%
+  dplyr::mutate(
+    Outcome = outcome_labs(outcome),
+
+    `Estimate (SE)` = sprintf("%.2f (%.2f)", est_f, se_f),
+    `95% CI`        = sprintf("[%.2f, %.2f]", l95_f, u95_f),
+    `p-value`       = format.pval(p_f, digits = 3, eps = 0.001),
+    `Δβ (with-no)`   = sprintf("%.2f", delta_beta_f),
+
+    `Post. mean (SD)` = sprintf("%.2f (%.2f)", est_b, sd_b),
+    `95% HPDI`         = sprintf("[%.2f, %.2f]", l95_b, u95_b),
+    `Pr(|β| > clin)`   = sprintf("%.3f", pr_abs_gt_clin),
+    `Δβ (with-no) `     = sprintf("%.2f", delta_beta_b),  # note trailing space to keep names unique
+
+    `ΔLOOIC (no-with)` = sprintf("%.1f", delta_looic_red_minus_full)
+  ) %>%
+  dplyr::select(
+    Outcome,
+    `Estimate (SE)`, `95% CI`, `p-value`, `Δβ (with-no)`,
+    `Post. mean (SD)`, `95% HPDI`, `Pr(|β| > clin)`, `Δβ (with-no) `,
+    `ΔLOOIC (no-with)`
+  )
+  
+  tab_fmt
+}
+
+#create both tables
+outcomes <- names(formulas_no_adh)
+
+main_tbl_fmt <- build_main_table(
+  outcomes = outcomes,
+  formulas_no_adh = formulas_no_adh,
+  lm_fits = lm_fits,
+  brms_fits = brms_fits,
+  run_brm = run_brm,
+  hiv_andata = hiv_andata,
+  models_dir = "../Models",
+  include_mcse = FALSE,
+  reloo = FALSE
+)
+
+secondary_tbl_fmt <- build_secondary_table(
+  outcomes = outcomes,
+  lm_fits = lm_fits,
+  brms_fits = brms_fits,
+  models_dir = "../Models",
+  include_mcse = FALSE,
+  reloo = FALSE
+)
+
+#use kableExtra to print nicely formatted tables and will work in rmarkdown to knit to pdf
+main_table <- kbl(
+  main_tbl_fmt,
+  booktabs = TRUE,
+  caption = "Main analysis: hard drug use coefficient by outcome (Frequentist vs Bayesian).",
+  align = c("l", rep("c", ncol(main_tbl_fmt) - 1)),
+  escape = TRUE
+) %>%
+  add_header_above(c(" " = 1, "Frequentist" = 3, "Bayesian" = 3, " " = 1)) %>%
+  kable_styling(latex_options = c("hold_position", "scale_down"))
+
+secondary_table <- kbl(
+  secondary_tbl_fmt,
+  booktabs = TRUE,
+  caption = "Secondary analysis (naive mediation): hard drug use coefficient by outcome (Frequentist vs Bayesian).",
+  align = c("l", rep("c", ncol(secondary_tbl_fmt) - 1)),
+  escape = TRUE
+) %>%
+  add_header_above(c(" " = 1, "Frequentist" = 4, "Bayesian" = 4, " " = 1)) %>%
+  column_spec(9, extra_css = "padding-left: 2mm;") %>%  # optional: a little visual separation
+  kable_styling(latex_options = c("hold_position", "scale_down")) %>%
+  # clean up the duplicated Δβ name (the one with the trailing space)
+  row_spec(0, bold = TRUE)
+```
+
+
+# Introduction
+Highly Active Antiretroviral Therapy (HAART) is the standard treatment regimen for HIV infection and substantially reduces disease progression by suppressing viral replication and improving immune function, as reflected by increases in CD4+ T-cell counts. The Multicenter AIDS Cohort Study is a prospective cohort study of HIV infected homosexual and bisexual men that includes longitudinal laboratory, clinical, and quality of life measurements collected over multiple years following HAART initiation. 
+
+Investigators are interested in whether baseline hard drug use is associated with poorer treatment response after initiating HAART. The primary scientific hypothesis is that participants reporting hard drug use at baseline experience worse outcomes two years after treatment initiation compared with those who do not report hard drug use. Treatment response was evaluated using four complementary outcomes: change in viral load, CD4+ T cell count, and physical and mental quality of life scores.
+
+The corresponding statistical hypotheses evaluate whether mean treatment response at two years differs by baseline hard drug use status for each outcome, adjusting for age, BMI, smoking status, education, and race/ethnicity. For each outcome, the null hypothesis is that there is no difference in mean treatment response between subjects who report hard drug use at baseline and those who do not, while the alternative hypothesis is that a difference exists. These hypotheses will be evaluated using both bayesian and frequentist methods.
+
+# Methods
+
+## Data Cleaning and Management
+
+The initial dataset included 715 unique patients with longitudinal clinical and quality of life measurements following HAART initiation. Data were recorded in long format with repeated observations by study year. This analysis focused on baseline (year 0) and two year follow up (year 2) measurements to evaluate short term treatment response.
+
+Several categorical variables were recoded to improve interpretability and reduce sparse cell counts. Race was collapsed to White vs Other, smoking status to Current smoker vs Not current smoker, adherence to ≥95% vs <95%, and education to College degree vs No college degree. Baseline hard drug use was represented as a binary exposure (Yes vs No). BMI values outside plausible physiologic ranges (≤0 or ≥250) were treated as implausible and coded as missing.
+
+Treatment response outcomes were defined using baseline and year 2 measurements: change in mental quality of life, change in physical quality of life, change in CD4+ T-cell count, and the log10 ratio of viral load (year 2 vs baseline). Viral load was log-transformed to reduce skewness and improve distributional symmetry; baseline viral load was similarly transformed for model adjustment. Histograms were used to assess outcome distributions.
+
+The analysis dataset was creating by restricting data to year 0 and 2, reshaping to wide format (one row per patient), and computing derived outcomes. Missingness was examined overall and stratified by baseline hard drug use. Because outcome missingness differed by exposure status, missing completely at random was considered unlikely. Analyses were therefore conducted using a complete-case approach, assuming outcomes were missing at random conditional on observed covariates included in the models. The final analytic sample included 476 participants.
+
+## Statistical Analysis
+
+The primary objective was to estimate the association between baseline hard drug and treatment response at two years. For each outcome, two linear regression models were fit: (1) a primary model adjusting for baseline outcome value, age, BMI, smoking status, education, and race/ethnicity; and (2) a secondary model additionally adjusting for year 2 adherence to assess how the hard drug use coefficient changed after accounting for adherence (a naive mediation analysis). Frequentist linear models were fit primarily as a validation check against the bayesian estimates.
+
+Frequentist results were summarized using point estimates, standard errors, two-sided p-values, and 95% confidence interval. Bayesian models were fit using brms package with the cmdstanr backend. Non-informative priors were specified to reflect minimal prior knowledge: Normal(0, $100^2$) for intercept and coefficients and Half-Normal(0, $100^2$) for residual standard deviation. Posterior inference for the hard drug use coefficient was summarized using posterior means, posterior standard deviations, and 95% highest density posterior intervals (HPDIs). Clinical relevance was assessed using posterior probabilities that the absolute effect exceeded pre-specified clinically meaningful thresholds: 2 points for quality-of-life outcomes, 50 cells for CD4+ count, and 0.5 for log10 viral load ratio. Models were fit using four chains with 20,000 iterations per chain, including 5,000 warmup iterations.
+
+
+Predictive performance of Bayesian models was evaluated using leave-one-out cross-validation (LOO). Differences in LOO information criterion ($\Delta$LOOIC) were used to compare full and reduced models, with lower LOOIC indicating improved expected predictive performance. Model diagnostics included trace plots, autocorrelation checks, split-chain $\hat{R}$ values near 1, and effective sample sizes exceeding 1000 for all parameters.
+
+# Results
+
+## Descriptive statistics
+
+Baseline characteristics stratified by baseline hard drug use are shown in Table 1. 39 (8.2%) subjects of the 476 in the study reported hard drug use at baseline. Overall demographic and clinical characteristics were generally similar across groups; 
+```{r, echo=FALSE, cache=FALSE}
+table1
+```
+however, participants reporting hard drug use were more likely to be current smokers (76.9% vs 36.5%) and less likely to have a college degree (25.6% vs 44.6%). Baseline values for CD4+ count, viral load, and quality of life measures were generally comparable between groups, with slightly lower baseline mental and physical quality of life scores among hard drug users.
+
+Figure 1 displays boxplots of the four treatment response outcomes. Descriptively, hard drug users appeared to show similar improvements in physical quality of life and CD4+ cell count, whereas differences in mental quality of life and viral load were less substantial.
+
+
+```{r, fig.cap= "Treatment Response (Year 2 - Year 0) by Hard Drug Use"}
+par(mfrow = c(2,2))
+
+boxplot(d_AGG_MENT ~ hard_drugs_cat_0,
+        data = hiv_andata,
+        col = c("red", "blue"),
+        main = "Mental QoL (Year2 - Baseline)",
+        xlab = "", ylab = "Change")
+
+boxplot(d_AGG_PHYS ~ hard_drugs_cat_0,
+        data = hiv_andata,
+        col = c("red", "blue"),
+        main = "Physical QoL (Year2 - Baseline)",
+        xlab = "", ylab = "Change")
+
+boxplot(d_LEU3N ~ hard_drugs_cat_0,
+        data = hiv_andata,
+        col = c("red", "blue"),
+        main = "CD4+ Cell Count (Year2 - Baseline)",
+        xlab = "", ylab = "Change")
+
+boxplot(r_logVLOAD ~ hard_drugs_cat_0,
+        data = hiv_andata,
+        col = c("red", "blue"),
+        main = "log(VLOAD2/VLOAD0)",
+        xlab = "", ylab = "Log ratio")
+
+par(mfrow = c(1,1))
+```
+## Main analysis: association between hard drug use and treatment response
+
+Table 2 summarizes regression results evaluating the association between baseline hard drug use and treatment response outcome, adjusting for baseline outcome value, age, BMI, smoking status, education, and race/ethnicity. Bayesian estimates are presented as the primary results, with frequentist estimates included for comparison.
+
+For change in mental quality of life, the posterior mean coefficient for hard drug use was -0.29 (95% HPDI: -3.78, 3.16), indicating little evidence of an association. The posterior probability (0.261) of a clinically meaningful effect was low.For physical quality of life, hard drug use was associated with poorer treatment response (posterior mean −3.34; 95% HPDI: −6.05, −0.60). The posterior probability (0.834) that the effect exceeded the predefined clinically meaningful threshold suggested moderate evidence of a clinically relevant reduction in improvement among hard drug users. The Bayesian model estimated a mean difference of −148.85 cells/µL (95% HPDI: −209.06, −90.29), indicating substantially poorer immunologic recovery among participants reporting hard drug use. Posterior probability (~1.00) results supported strong evidence of a clinically meaningful effect. For viral load change, the posterior mean coefficient was close to zero (-0.60; 95% HPDI: -0.47, 0.33), suggesting little evidence of an association. Posterior probability (0.018)  of a clinically meaningful effect was low.
+
+Across outcomes, bayesian and frequentist estimates were highly concordant. Model comparison using change in LOOIC favored models including hard drug use for CD4+ count and physical quality-of-life outcomes, while improvements were minimal for mental quality of life and viral load, consistent with weaker evidence for these associations.
+
+```{r, echo = FALSE, cache=FALSE}
+main_table
+```
+
+## Secondary analysis: adjustment for adherence to treatment
+
+Descriptive measures from Table 1 demonstrate there is a higher percentage (97.4%) of hard drug users with $\ge 95\%$ adherence compared to non hard drug users (89.5%), indicating a potential relationship between hard drug use and treatment adherence. Table 3 presents results from models additionally adjusting for treatment adherence at year 2. The primary goal was to assess how the hard drug use coefficient changed after inclusion of adherence. The frequentist results are again shown primarily as a reference. For mental quality of life, the hard drug use coefficient changed modestly from -0.29 to -0.53 after adjustment for adherence, indicating little meaningful change in effect magnitude. Similarly, for physical quality of life, the estimate changed only slightly (approximately -3.34 to -3.57), suggesting that adherence did not substantially explain the association between hard drug use and physical quality of life change. For CD4+ cellc ount, adjustment for adherence led to a modest increase in magnitude (approximately -148.85 to -153.79), again indicating minimal change of the hard drug use effect. In contrast, the viral load coefficient moved closer to zero after adjustment (from -0.06 to -0.01), though both estimates remained small and highly uncertain. Overall, these findings suggest limited evidence that adherence substantially explained the association between baseline hard drug use and treatment response.
+
+```{r, echo=FALSE, cache=FALSE}
+secondary_table
+```
+
+## Model diagnostics
+
+Diagnostics indicated good convergence and sampling performance for all Bayesian models. Maximum $\hat{R}$ values were approximately 1.00, effective sample sizes were large (all > 26,000), and no divergent transitions were observed. Trace plots demonstrated good chain mixing, and autocorrelation decreased rapidly across lags. These diagnostics support the stability and reliability of the posterior estimates.
+
+# Discussion
+
+This analysis evaluated whether hard drug use was associated with treatment response two years after HAART initiation, using both bayesian and frequentist regression models. Across outcomes, results suggested that hard drug use was associated with poorer treatment response for physical quality of life and CD4+ cell count, while little evidence was observed for associations with mental quality of life or viral load change. Bayesian estimates were consistent with frequentist results, giving us reassurance that model specification was appropriate. Model comparison using changes in LOOIC supported stronger evidence for associations involving physical QoL and immunologic recovery than for the other outcomes.
+
+The posterior probabilities of clinically meaningful effects provided interpretable measure of clinical relevance. These probabilities suggested meaningful evidence of clinically important differences in physical quality of life and CD4+ cell count for hard drug users, whereas clinically meaningful effects were unlikely for mental QoL and viral load. 
+
+Several limitations should be considered when interpreting these results. First, this was a complete case analysis. Although we believe missingness is at random for the outcomes, bias may still arise if missingness depended on unobserved factors. Second, covariates were collapsed into binary categories due to sparse sample sizes in some levels, which may have reduced the ability to detect nuanced associations. Third, the secondary analysis evaluating adherence to treatment was not a formal mediation analysis. While our results from this naive "mediation" analysis may provide descriptive insight, this approach does not estimate direct and indirect effects. Future work could extend this analysis using a formal mediation framework to rigorously evaluate whether adherence mediates the relationship between hard drug use and treatment response. Overall, these results suggest that baseline hard drug use may be an important predictor of poor physical and immunologic outcomes following HAART initiation. Future studies incorporating longitudinal methods, alternative missing data methods, and better measurements of behavioral factors can help clarify the mechanisms behind these associations. 
+
