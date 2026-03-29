@@ -1,0 +1,185 @@
+---
+title: "Project 2: Analysis Plan"
+author: "Eduardo Romo"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    number_sections: false
+    toc: false
+fontsize: 12pt
+geometry: margin=1in
+header-includes:
+  - \usepackage{setspace}
+  - \doublespacing
+  - \usepackage{float}
+  - \usepackage{graphicx}
+  - \floatplacement{figure}{H}
+  - \floatplacement{table}{H}
+  - \setlength{\parindent}{2em}
+  - \setlength{\parskip}{0pt}
+---
+
+```{r setup, include=FALSE}
+library(powertools)
+library(car)
+library(kableExtra)
+library(tidyverse)
+
+
+```
+
+
+# Aim 1
+
+## Analysis Plan
+For Aim 1, we will evaluate whether peripheral inflammatory markers are associated with one-year change in episodic memory and AD-signature cortical thickness. We will test two hypotheses: (1) higher baseline levels of circulating  cytokines and chemokines are associated with declines in memory and cortical thickness; and (2) increases in these markers over time are associated with greater declines in these outcomes. Outcomes include episodic memory measures from the CVLT, Benson Figure delayed recall, Mnemonic Similarity Task, and one-week delayed story recall, as well as mean cortical thickness across AD-signature regions from structural MRI. Primary predictors are IL-6, TNF-$\alpha$, MCP-1, and Eotaxin-1.
+
+Data will be cleaned and screened for missingness, outliers, and collinearity. Descriptive analyses will identify candidate covariates associated with predictors and/or outcomes. If collinearity among the inflammatory markers is acceptable, multivariable linear regression models including all four markers will be fit; otherwise, separate models will be used. For Hypothesis 1, baseline predictors will be related to one-year outcomes using linear regression while adjusting for baseline outcome values, age, sex, and other covariates. For Hypothesis 2, models will assess associations between changes in predictors and outcomes with the same adjustments.
+
+## Power
+Because enrollment is N = 175, power rather than sample size was evaluated. For joint models, power was calculated in powertools using multiple linear regression omnibus tests across  plausible $R^2$ values informed by  preliminary data on baseline IL-6, baseline MCP-1, and one-year change in CVLT and cortical thickness. Observed $R^2$ values ranged from approximately 0.11 to 0.48 so power analyses considered $R^2=$ 0.05 to 0.60. Because preliminary data were available only for baseline inflammatory markers and one-year change outcomes, the same effect-size scenarios were used to approximate power for both Aim 1 hypotheses. As shown in Table 1, power for joint models exceeded 90% at $R^2=0.10$ and was essentially 100% for larger effects. This suggests that the study is well-powered to detect joint associations between inflammatory markers and outcomes under plausible scenarios. For separate-marker models, power was evaluated using correlations from 0.10 to 0.90. As shown in Table 2, power was low for small effects (r = 0.10, power = 0.18) but reached 0.87 at r = 0.25 and was near 100% for larger effects. Thus, the study is well powered for modest to large associations but may be underpowered for small effects. Because preliminary data were unavailable for all planned covariates, these calculations were based on simplified models; adjustment for precision variables may increase power, whereas adjustment for strong confounders may reduce it.
+
+```{r, echo=FALSE, cache=FALSE}
+####Aim 1 power calculation
+N_total <- 175
+##Branch A: joint model
+#range of Rsquared values based on preliminary data
+
+aim1_joint_grid <- tibble(
+  Rsq = c(0.05, 0.1, 0.2, 0.35, 0.5, 0.6)
+) %>%
+  mutate(
+    power_p4 = map_dbl(
+      Rsq,
+      ~ mlrF.overall(
+        N = N_total,
+        p = 4,
+        Rsq = .x,
+        alpha = 0.025
+      )
+    )
+  )
+
+kable(aim1_joint_grid, digits = 2, booktabs = TRUE, format = "latex", escape = FALSE,
+      caption = "Power for Aim 1 using joint models", col.names = c("$R^2$", "Power")) %>%
+  kable_styling(latex_options = c("hold_position"))
+```
+
+
+```{r, echo=FALSE, cache=FALSE}
+##Branch B: separate models if predictors highly collinear
+aim1_corr_grid <- tibble(
+  rhoA = c(0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9)
+) %>%
+  mutate(
+    power = map_dbl(
+      rhoA,
+      ~ corr.1samp(
+        N = N_total,
+        rho0 = 0,
+        rhoA = .x,
+        alpha = 0.025,
+        sides = 2
+      )
+    )
+  )
+
+kable(aim1_corr_grid, digits = 2, booktabs = TRUE, format = "latex", escape = FALSE,
+      caption = "Power for Aim 1 using separate models", col.names = c("$\\rho$", "Power")) %>%
+  kable_styling(latex_options = c("hold_position"))
+```
+
+
+# Aim 2
+
+## Analysis Plan
+For Aim 2, we will evaluate whether peripheral inflammation modifies the association between amyloid burden and one-year change in cognition and cortical thickness. We hypothesize that individuals with both elevated inflammatory markers and high amyloid burden will experience the greatest declines over one year. For each inflammatory marker, adjusted linear regression models will include main effects for the marker and amyloid deposition plus a marker-by-amyloid interaction term, adjusting for baseline outcome, age, sex, and other covariates. The primary test will assess whether adding the interaction improves fit relative to a model with only main effects. If collinearity is acceptable, models including all markers and their interaction terms will also be considered.
+
+## Power
+For Aim 2, amyloid burden was dichotomized to simplify the power analysis and reflect interest in comparing individuals with low versus high amyloid groups Power was estimated for detecting differences in the marker-outcome correlation across amyloid groups, providing a simplified approximation to the planned interaction analysis in the absence of preliminary amyloid and covariate data. As shown in Table 3, power depended strongly on both the correlation difference and the balance of the amyloid groups. For small differences ($\Delta \rho=0.1$), power was low across all splits (0.064 to 0.097). For $\Delta \rho = 0.2$, power remained limited (0.147 to 0.272). However, power increased substantially for larger differences, exceeding 0.50 when $\Delta \rho = 0.4$ in more balanced splits and exceeding 0.90 when $\Delta \rho=0.5$ for most splits. Overall, the study is reasonably powered to detect moderate to large effect modification but not small interaction effects, especially when amyloid groups are highly imbalanced.
+
+```{r, echo=FALSE, cache=FALSE}
+####Aim 2 power calculation
+aim2_power_final <- tribble(
+  ~n1, ~n2, ~rho1, ~rho2,
+   150,  25,  0.10,  0.20,
+   150,  25,  0.10,  0.30,
+   150,  25,  0.10,  0.40,
+   150,  25,  0.10,  0.50,
+   150,  25,  0.10,  0.60,
+   125,  50,  0.10,  0.20,
+   125,  50,  0.10,  0.30,
+   125,  50,  0.10,  0.40,
+   125,  50,  0.10,  0.50,
+   125,  50,  0.10,  0.60,
+   100,  75,  0.10,  0.20,
+   100,  75,  0.10,  0.30,
+   100,  75,  0.10,  0.40,
+   100,  75,  0.10,  0.50,
+   100,  75,  0.10,  0.60,
+    75, 100,  0.10,  0.20,
+    75, 100,  0.10,  0.30,
+    75, 100,  0.10,  0.40,
+    75, 100,  0.10,  0.50,
+    75, 100,  0.10,  0.60,
+    50, 125,  0.10,  0.20,
+    50, 125,  0.10,  0.30,
+    50, 125,  0.10,  0.40,
+    50, 125,  0.10,  0.50,
+    50, 125,  0.10,  0.60,
+    25, 150,  0.10,  0.20,
+    25, 150,  0.10,  0.30,
+    25, 150,  0.10,  0.40,
+    25, 150,  0.10,  0.50,
+    25, 150,  0.10,  0.60
+) %>%
+  mutate(
+    n.ratio = n2 / n1,
+    diff_rho = rho2 - rho1,
+    power = pmap_dbl(
+      list(n1, n.ratio, rho1, rho2),
+      function(n1, n.ratio, rho1, rho2) {
+        corr.2samp(
+          n1 = n1,
+          n.ratio = n.ratio,
+          rho1 = rho1,
+          rho2 = rho2,
+          alpha = 0.05,
+          sides = 2
+        )
+      }
+    ),
+    `Sample Size Split` = paste0(n1, "/", n2),
+    `Correlation Difference` = round(diff_rho, 2),
+    Power = round(power, 3)
+  ) %>%
+  select(`Correlation Difference`, `Sample Size Split`, Power) %>%
+  pivot_wider(
+    names_from = `Sample Size Split`,
+    values_from = Power
+  ) %>%
+  arrange(`Correlation Difference`)
+kable(
+  format = "latex",
+  escape = FALSE,
+  aim2_power_final,
+  booktabs = TRUE,
+  caption = "Power for Aim 2 across correlation differences and amyloid group sample-size splits",
+  col.names = c("$\\Delta \\rho$", "150/25", "125/50", "100/75", "75/100", "50/125", "25/150")
+) %>%
+  kable_styling(latex_options = "hold_position") %>%
+  add_header_above(c(" " = 1, "Amyloid Deposition Group Sample Size Splits" = 6))
+```
+
+
+# Type I Error Control
+
+To account for multiple comparisons across outcomes, we controlled the family-wise Type I error rate at $\alpha=0.05$ by defining two outcome domains: episodic memory outcomes and AD-signature cortical thickness. Because these domains represent distinct constructs, we allocated the Type I error rate equally across the two families using a Bonferroni approach, which resulted in a significance threshold of $\alpha=0.025$ for each domain. Because outcomes within each domain are expected to be correlated, no further adjustment will be applied, and inference will emphasize consistency of effects across measures.
+
+
+\newpage
+# Reproducible Research Information
+https://github.com/eromo96/BIOS6624.git
+
+Data Location: /Users/eduardo/Eduardo/UColorado PhD Bios/Spring 26/BIOS6624 Advanced Statistical Methods/BIOS6624/Project2/Data
