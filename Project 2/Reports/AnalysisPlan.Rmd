@@ -97,7 +97,7 @@ kable(aim1_corr_grid, digits = 2, booktabs = TRUE, format = "latex", escape = FA
 For Aim 2, we will evaluate whether peripheral inflammation modifies the association between amyloid burden and one-year change in cognition and cortical thickness. We hypothesize that individuals with both elevated inflammatory markers and high amyloid burden will experience the greatest declines over one year. For each inflammatory marker, adjusted linear regression models will include the marker, amyloid deposition, their interaction, baseline outcome value, age, sex, and other selected covariates. The primary test will be the marker-by-amyloid interaction coefficient at $\alpha=0.025$. If collinearity among inflammatory markers is acceptable, models including all markers and their interaction terms will also be considered, with inference based on a joint F-test of the interaction block.
 
 ## Power
-For Aim 2, power was estimated using \textit{powertools::corr.2samp()} to detect differences in the marker-outcome correlation across dichotomized amyloid groups. This provided a simplified approximation to the planned interaction analysis because preliminary data on amyloid deposition and additional covariates were unavailable. As shown in Table 3, power depended strongly on both the correlation difference and the balance of the amyloid groups. For small differences ($\Delta \rho=0.1$), power was low across all splits (0.064 to 0.097). For $\Delta \rho = 0.2$, power remained limited (0.147 to 0.272). Power increased substantially for larger differences, exceeding 0.50 when $\Delta \rho = 0.4$ in more balanced splits and exceeding 0.90 when $\Delta \rho=0.5$ for most splits. Overall, the study is reasonably powered to detect moderate to large effect modification but not small interaction effects, especially when amyloid groups are highly imbalanced.
+For Aim 2, power was estimated using \textit{powertools::corr.2samp()} to detect differences in the marker-outcome correlation across dichotomized amyloid groups. This provided a simplified approximation to the planned interaction analysis because preliminary data on amyloid deposition and additional covariates were unavailable. As shown in Table 3, power depended strongly on both the correlation difference and the balance of the amyloid groups. For small differences ($\Delta \rho=0.1$), power was low across all splits (0.038 to 0.057). For $\Delta \rho = 0.2$, power remained limited (0.097 to 0.188). Power increased substantially for larger differences, exceeding 0.40 when $\Delta \rho = 0.4$ in more balanced splits and exceeding 0.90 when $\Delta \rho=0.5$ for most splits. Overall, the study is reasonably powered to detect moderate to large effect modification but not small interaction effects, especially when amyloid groups are highly imbalanced.
 
 ```{r, echo=FALSE, cache=FALSE}
 ####Aim 2 power calculation
@@ -145,7 +145,7 @@ aim2_power_final <- tribble(
           n.ratio = n.ratio,
           rho1 = rho1,
           rho2 = rho2,
-          alpha = 0.05,
+          alpha = 0.025,
           sides = 2
         )
       }

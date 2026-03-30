@@ -88,7 +88,7 @@ aim2_power_final <- tribble(
           n.ratio = n.ratio,
           rho1 = rho1,
           rho2 = rho2,
-          alpha = 0.05,
+          alpha = 0.025,
           sides = 2
         )
       }
