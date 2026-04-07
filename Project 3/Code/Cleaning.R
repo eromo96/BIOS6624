@@ -35,6 +35,14 @@ fram_base <- fram_data %>%
     stroke_time_days = pmin(TIMESTRK, ten_yrdys),
     stroke_time_yrs = stroke_time_days/365.25
   )
+#complete case analysis dataset for aim 1
+fram_model <- fram_base %>%
+  select(
+    RANDID, sex, AGE, diabetes, SYSBP,
+    prevchd, bpmeds, cursmoke, TOTCHOL, BMI,
+    stroke_10, stroke_time_days, stroke_time_yrs
+  ) %>%
+  drop_na(AGE, diabetes, SYSBP, prevchd, bpmeds, cursmoke, TOTCHOL, BMI)
 
 #create dataset for descriptive time varying covariate part
 fram_long_desc <- fram_data %>%
