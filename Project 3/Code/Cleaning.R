@@ -30,11 +30,16 @@ fram_base <- fram_data %>%
   mutate(
     ten_yrdys = 10*365.25,
     #event within first 10 years
-    stroke_10 = if_else(STROKE == 1 & TIMESTRK <= ten_yrdys, 1, 0),
+    stroke_10 = if_else(STROKE == 1 & TIMESTRK <= ten_yrdys, STROKE, 0),
     #truncate follow up time at 10 years
     stroke_time_days = pmin(TIMESTRK, ten_yrdys),
     stroke_time_yrs = stroke_time_days/365.25
   )
+#create separate baseline datasets by gender for data exploration
+fram_base_male <- fram_base %>%
+  filter(sex == "Male")
+fram_base_female <- fram_base %>%
+  filter(sex == "Female")
 #complete case analysis dataset for aim 1
 fram_model <- fram_base %>%
   select(
@@ -44,6 +49,11 @@ fram_model <- fram_base %>%
   ) %>%
   drop_na(AGE, diabetes, SYSBP, prevchd, bpmeds, cursmoke, TOTCHOL, BMI)
 
+#create separate complete case analysis dataset for male and female
+fram_mod_male <- fram_model %>%
+  filter(sex == "Male")
+fram_mod_female <- fram_model %>%
+  filter(sex == "Female")
 #create dataset for descriptive time varying covariate part
 fram_long_desc <- fram_data %>%
   select(RANDID, PERIOD, TIME, sex, AGE, diabetes, SYSBP) %>%

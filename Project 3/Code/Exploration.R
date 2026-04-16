@@ -1,6 +1,7 @@
 #data exploration and descriptives
 library(kableExtra)
-
+library(survival)
+library(survminer)
 #read in code form cleaning script so that we dont have to redo data cleaning here
 source("./Project 3/Code/Cleaning.R")
 
@@ -19,7 +20,93 @@ fram_base %>%
 #label stroke variable
 fram_base <- fram_base %>%
   mutate(
-    stroke_10 = factor(stroke_10, levels = c(0, 1), labels = c("No", "Yes"))
+    stroke_10_fac = factor(stroke_10, levels = c(0, 1), labels = c("No", "Yes"))
+  )
+
+##create grid (2x5) of kaplan meier curves stratified by gender and 5 risk factors of interest
+#create separate dataset of plotting variables
+km_data <- fram_base %>%
+  mutate(
+    bmi_group = factor(
+      if_else(BMI >= 30, "Obese (>=30)", "Not Obese (<30)"),
+      levels = c("Not Obese (<30)", "Obese (>=30)")
+    ),
+    chol_group = factor(
+      if_else(TOTCHOL >= 240, "High (>=240)", "Not high (<240)"),
+      levels = c("Not high (<240)", "High (>=240)")
+    )
+  ) %>%
+  select(
+    RANDID, sex, stroke_time_yrs, stroke_10, prevchd, bpmeds,
+    cursmoke, chol_group, bmi_group
+  )
+#reshape to long
+km_long <- km_data %>%
+  pivot_longer(
+    cols = c(prevchd, bpmeds, cursmoke, chol_group, bmi_group),
+    names_to = "risk_factor",
+    values_to = "group"
+  ) %>%
+  mutate(
+    risk_factor = recode(
+      risk_factor,
+      prevchd = "Coronary heart disease",
+      bpmeds = "Blood pressure meds",
+      cursmoke = "Current smoker",
+      chol_group = "Total cholesterol",
+      bmi_group = "BMI"
+    ),
+    risk_factor = factor(
+      risk_factor,
+      levels = c(
+        "Coronary heart disease",
+        "Blood pressure meds",
+        "Current smoker",
+        "Total cholesterol",
+        "BMI"
+      )
+    )
+  )
+#function for survfit output
+tidy_survfit <- function(data) {
+  fit <- survfit(Surv(stroke_time_yrs, stroke_10) ~ group, data = data)
+  
+  s <- summary(fit)
+  
+  out <- tibble(
+    time = s$time,
+    surv = s$surv,
+    strata = s$strata
+  )
+  
+  # extract group name from strings like "group=Yes"
+  out <- out %>%
+    mutate(group = sub("^group=", "", strata))
+  
+  out
+}
+#fit km curves for each sex x risk factor
+km_plot_data <- km_long %>%
+  group_by(sex, risk_factor) %>%
+  nest() %>%
+  mutate(km = map(data, tidy_survfit)) %>%
+  select(-data) %>%
+  unnest(km)
+#plot 2x5 faceted km figure
+ggplot(km_plot_data, aes(x = time, y = surv, linetype = group)) +
+  geom_step(linewidth = 0.6) +
+  facet_grid(sex ~ risk_factor) +
+  labs(
+    x = "Follow-up time (years)",
+    y = "Survival probability",
+    linetype = NULL,
+    title = "Kaplan-Meier curves for stroke-free survival by sex and baseline risk factors"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 9),
+    plot.title = element_text(hjust = 0.5)
   )
 ####Table 1
 # Sample sizes for headers
@@ -131,7 +218,7 @@ make_cat_block <- function(data, var, label) {
 
 # build table
 table1 <- bind_rows(
-  make_cat_block(fram_base, "stroke_10", "Stroke during follow-up"),
+  make_cat_block(fram_base, "stroke_10_fac", "Stroke during follow-up"),
   make_cont_block(fram_base, "stroke_time_yrs", "Follow-up time (years)"),
   make_cont_block(fram_base, "AGE", "Age"),
   make_cont_block(fram_base, "SYSBP", "Systolic blood pressure"),
