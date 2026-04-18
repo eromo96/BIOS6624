@@ -5,17 +5,46 @@ library(survminer)
 #read in code form cleaning script so that we dont have to redo data cleaning here
 source("./Project 3/Code/Cleaning.R")
 
+#=============
+#Basic descriptive data exploration
+#=============
 #some basic data checks/descriptives
 fram_base %>% count(RANDID) %>% count(n)
 #sample size by sex
 fram_base %>% count(sex)
 #number of 10 year stroke events by sex
 fram_base %>% count(sex, stroke_10)
-#missingness in analysis variables
+##missingness
+#count and percent of missingness
 fram_base %>%
   summarise(
-    across(c(AGE, DIABETES, SYSBP, PREVCHD, BPMEDS, CURSMOKE, TOTCHOL, BMI),
-           ~ sum(is.na(.)))
+    across(
+      c(AGE, DIABETES, SYSBP, PREVCHD, BPMEDS, CURSMOKE, TOTCHOL, BMI),
+      ~ paste0(
+        sum(is.na(.)), " (",
+        round(100 * mean(is.na(.)), 1), "%)"
+      )
+    )
+  )
+#pct missing of total dataset
+fram_base %>%
+  mutate(complete_case = if_all(
+    c(AGE, DIABETES, SYSBP, PREVCHD, BPMEDS, CURSMOKE, TOTCHOL, BMI),
+    ~ !is.na(.)
+  )) %>%
+  summarise(
+    complete = sum(complete_case),
+    missing = sum(!complete_case),
+    pct_missing = round(100 * mean(!complete_case), 1)
+  )
+#missinness by sex
+fram_base %>%
+  group_by(sex) %>%
+  summarise(
+    across(
+      c(AGE, DIABETES, SYSBP, PREVCHD, BPMEDS, CURSMOKE, TOTCHOL, BMI),
+      ~ round(100 * mean(is.na(.)), 1)
+    )
   )
 #label stroke variable
 fram_base <- fram_base %>%
@@ -108,7 +137,11 @@ ggplot(km_plot_data, aes(x = time, y = surv, linetype = group)) +
     strip.text = element_text(size = 9),
     plot.title = element_text(hjust = 0.5)
   )
-####Table 1
+
+#=============
+#Table 1
+#=============
+
 # Sample sizes for headers
 # sample sizes for column headers
 n_male <- sum(fram_base$sex == "Male")

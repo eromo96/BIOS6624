@@ -1,0 +1,540 @@
+---
+title: "Project3: Final Report"
+author: "Eduardo Romo"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    number_sections: false
+    toc: false
+fontsize: 12pt
+geometry: margin=1in
+header-includes:
+  - \usepackage{setspace}
+  - \doublespacing
+  - \usepackage{float}
+  - \usepackage{graphicx}
+  - \floatplacement{figure}{H}
+  - \floatplacement{table}{H}
+  - \setlength{\parindent}{2em}
+  - \setlength{\parskip}{0pt}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 7.5, fig.height = 4.5
+)
+library(kableExtra)
+library(survival)
+library(survminer)
+#Code for cleaning framingham data
+library(tidyverse)
+
+#read in data
+fram_data <- read_csv("../Data/frmgham2.csv")
+
+#select columns that are of interest
+fram_data <- fram_data %>%
+  select(
+    RANDID, PERIOD, TIME, SEX,
+    AGE, DIABETES, SYSBP,
+    PREVCHD, BPMEDS, CURSMOKE, TOTCHOL, BMI,
+    PREVSTRK, STROKE, TIMESTRK
+  )
+#recode variables for readibility
+fram_data <- fram_data %>%
+  mutate(
+    sex = factor(SEX, levels = c(1,2), labels = c("Male", "Female")),
+    diabetes = factor(DIABETES, levels = c(0,1), labels = c("No", "Yes")),
+    bpmeds = factor(BPMEDS, levels = c(0,1), labels = c("No", "Yes")),
+    cursmoke = factor(CURSMOKE, levels = c(0, 1), labels = c("No", "Yes")),
+    prevchd = factor(PREVCHD, levels = c(0,1), labels = c("No", "Yes")),
+    prevstrk = factor(PREVSTRK, levels = c(0,1), labels = c("No", "Yes"))
+  )
+
+#create main analysis dataset
+fram_base <- fram_data %>%
+  #first exam period only and exclude those with stroke at baseline
+  filter(PERIOD == 1, PREVSTRK == 0) %>%
+  mutate(
+    ten_yrdys = 10*365.25,
+    #event within first 10 years
+    stroke_10 = if_else(STROKE == 1 & TIMESTRK <= ten_yrdys, STROKE, 0),
+    #truncate follow up time at 10 years
+    stroke_time_days = pmin(TIMESTRK, ten_yrdys),
+    stroke_time_yrs = stroke_time_days/365.25
+  )
+#create separate baseline datasets by gender for data exploration
+fram_base_male <- fram_base %>%
+  filter(sex == "Male")
+fram_base_female <- fram_base %>%
+  filter(sex == "Female")
+#complete case analysis dataset for aim 1
+fram_model <- fram_base %>%
+  select(
+    RANDID, sex, AGE, diabetes, SYSBP,
+    prevchd, bpmeds, cursmoke, TOTCHOL, BMI,
+    stroke_10, stroke_time_days, stroke_time_yrs
+  ) %>%
+  drop_na(AGE, diabetes, SYSBP, prevchd, bpmeds, cursmoke, TOTCHOL, BMI)
+
+#create separate complete case analysis dataset for male and female
+fram_mod_male <- fram_model %>%
+  filter(sex == "Male")
+fram_mod_female <- fram_model %>%
+  filter(sex == "Female")
+#create dataset for descriptive time varying covariate part
+fram_long_desc <- fram_data %>%
+  select(RANDID, PERIOD, TIME, sex, AGE, diabetes, SYSBP) %>%
+  mutate(
+    time_yrs = TIME/365.25,
+    period = factor(PERIOD, levels = c(1, 2, 3),
+                    labels = c("Exam 1", "Exam 2", "Exam 3"))
+  )
+
+#label stroke variable
+fram_base <- fram_base %>%
+  mutate(
+    stroke_10_fac = factor(stroke_10, levels = c(0, 1), labels = c("No", "Yes"))
+  )
+
+##create grid (2x5) of kaplan meier curves stratified by gender and 5 risk factors of interest
+#create separate dataset of plotting variables
+km_data <- fram_base %>%
+  mutate(
+    bmi_group = factor(
+      if_else(BMI >= 30, "Obese (>=30)", "Not Obese (<30)"),
+      levels = c("Not Obese (<30)", "Obese (>=30)")
+    ),
+    chol_group = factor(
+      if_else(TOTCHOL >= 240, "High (>=240)", "Not high (<240)"),
+      levels = c("Not high (<240)", "High (>=240)")
+    )
+  ) %>%
+  select(
+    RANDID, sex, stroke_time_yrs, stroke_10, prevchd, bpmeds,
+    cursmoke, chol_group, bmi_group
+  )
+#reshape to long
+km_long <- km_data %>%
+  pivot_longer(
+    cols = c(prevchd, bpmeds, cursmoke, chol_group, bmi_group),
+    names_to = "risk_factor",
+    values_to = "group"
+  ) %>%
+  mutate(
+    risk_factor = recode(
+      risk_factor,
+      prevchd = "Coronary heart disease",
+      bpmeds = "Blood pressure meds",
+      cursmoke = "Current smoker",
+      chol_group = "Total cholesterol",
+      bmi_group = "BMI"
+    ),
+    risk_factor = factor(
+      risk_factor,
+      levels = c(
+        "Coronary heart disease",
+        "Blood pressure meds",
+        "Current smoker",
+        "Total cholesterol",
+        "BMI"
+      )
+    )
+  )
+#function for survfit output
+tidy_survfit <- function(data) {
+  fit <- survfit(Surv(stroke_time_yrs, stroke_10) ~ group, data = data)
+  
+  s <- summary(fit)
+  
+  out <- tibble(
+    time = s$time,
+    surv = s$surv,
+    strata = s$strata
+  )
+  
+  # extract group name from strings like "group=Yes"
+  out <- out %>%
+    mutate(group = sub("^group=", "", strata))
+  
+  out
+}
+#fit km curves for each sex x risk factor
+km_plot_data <- km_long %>%
+  group_by(sex, risk_factor) %>%
+  nest() %>%
+  mutate(km = map(data, tidy_survfit)) %>%
+  select(-data) %>%
+  unnest(km)
+#plot 2x5 faceted km figure
+km_plots <- ggplot(km_plot_data, aes(x = time, y = surv, linetype = group)) +
+  geom_step(linewidth = 0.6) +
+  facet_grid(sex ~ risk_factor) +
+  labs(
+    x = "Follow-up time (years)",
+    y = "Survival probability",
+    linetype = NULL
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = 9),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+####Table 1
+# Sample sizes for headers
+# sample sizes for column headers
+n_male <- sum(fram_base$sex == "Male")
+n_female <- sum(fram_base$sex == "Female")
+n_overall <- nrow(fram_base)
+
+male_header <- paste0("Male\nN=", n_male)
+female_header <- paste0("Female\nN=", n_female)
+overall_header <- paste0("Overall\nN=", n_overall)
+
+# formatting helpers
+fmt_mean_sd <- function(x) {
+  if (all(is.na(x))) return("")
+  sprintf("%.2f (%.2f)", mean(x, na.rm = TRUE), sd(x, na.rm = TRUE))
+}
+
+fmt_n_pct <- function(n, denom) {
+  if (is.na(denom) || denom == 0) return("")
+  sprintf("%d (%.1f\\%%)", n, 100 * n / denom)
+}
+
+# continuous block
+make_cont_block <- function(data, var, label) {
+  x_all <- data[[var]]
+  x_m <- data %>% filter(sex == "Male") %>% pull(all_of(var))
+  x_f <- data %>% filter(sex == "Female") %>% pull(all_of(var))
+  
+  out <- tibble(
+    Variable = label,
+    Male = fmt_mean_sd(x_m),
+    Female = fmt_mean_sd(x_f),
+    Overall = fmt_mean_sd(x_all)
+  )
+  
+  miss_all <- sum(is.na(x_all))
+  miss_m <- sum(is.na(x_m))
+  miss_f <- sum(is.na(x_f))
+  
+  if (miss_all > 0) {
+    out <- bind_rows(
+      out,
+      tibble(
+        Variable = "\\hspace{1em}Missing, n (\\%)",
+        Male = fmt_n_pct(miss_m, length(x_m)),
+        Female = fmt_n_pct(miss_f, length(x_f)),
+        Overall = fmt_n_pct(miss_all, length(x_all))
+      )
+    )
+  }
+  
+  out
+}
+
+# categorical block
+make_cat_block <- function(data, var, label) {
+  x_all <- data[[var]]
+  x_m <- data %>% filter(sex == "Male") %>% pull(all_of(var))
+  x_f <- data %>% filter(sex == "Female") %>% pull(all_of(var))
+  
+  levs <- levels(droplevels(factor(x_all)))
+  
+  rows <- lapply(levs, function(lv) {
+    denom_all <- sum(!is.na(x_all))
+    denom_m <- sum(!is.na(x_m))
+    denom_f <- sum(!is.na(x_f))
+    
+    n_all <- sum(x_all == lv, na.rm = TRUE)
+    n_m <- sum(x_m == lv, na.rm = TRUE)
+    n_f <- sum(x_f == lv, na.rm = TRUE)
+    
+    tibble(
+      Variable = paste0("\\hspace{1em}", lv),
+      Male = fmt_n_pct(n_m, denom_m),
+      Female = fmt_n_pct(n_f, denom_f),
+      Overall = fmt_n_pct(n_all, denom_all)
+    )
+  })
+  
+  out <- bind_rows(
+    tibble(
+      Variable = label,
+      Male = "",
+      Female = "",
+      Overall = ""
+    ),
+    bind_rows(rows)
+  )
+  
+  miss_all <- sum(is.na(x_all))
+  miss_m <- sum(is.na(x_m))
+  miss_f <- sum(is.na(x_f))
+  
+  if (miss_all > 0) {
+    out <- bind_rows(
+      out,
+      tibble(
+        Variable = "\\hspace{1em}Missing, n (\\%)",
+        Male = fmt_n_pct(miss_m, length(x_m)),
+        Female = fmt_n_pct(miss_f, length(x_f)),
+        Overall = fmt_n_pct(miss_all, length(x_all))
+      )
+    )
+  }
+  
+  out
+}
+
+# build table
+table1 <- bind_rows(
+  make_cat_block(fram_base, "stroke_10_fac", "Stroke during follow-up"),
+  make_cont_block(fram_base, "stroke_time_yrs", "Follow-up time (years)"),
+  make_cont_block(fram_base, "AGE", "Age"),
+  make_cont_block(fram_base, "SYSBP", "Systolic blood pressure"),
+  make_cat_block(fram_base, "bpmeds", "Blood pressure meds"),
+  make_cont_block(fram_base, "TOTCHOL", "Total cholesterol"),
+  make_cont_block(fram_base, "BMI", "BMI"),
+  make_cat_block(fram_base, "diabetes", "Diabetes"),
+  make_cat_block(fram_base, "prevchd", "Coronary heart disease"),
+  make_cat_block(fram_base, "cursmoke", "Current smoker")
+)
+
+colnames(table1) <- c(
+  "Variable",
+  male_header,
+  female_header,
+  overall_header
+)
+
+#==============
+#Cox Proportional Hazards Modeleling
+#==============
+#fit full models for each gender separately
+fullcox_fem <- coxph(Surv(stroke_time_yrs, stroke_10) ~ AGE + diabetes +
+                       SYSBP + prevchd + bpmeds + cursmoke + TOTCHOL + BMI,
+                     data = fram_mod_female)
+fullcox_male <- coxph(Surv(stroke_time_yrs, stroke_10) ~ AGE + diabetes +
+                        SYSBP + prevchd + bpmeds + cursmoke + TOTCHOL + BMI,
+                      data = fram_mod_male)
+#run backward selection via AIC for each gender separately
+back1_fem <- step(fullcox_fem, direction = "backward", 
+                  scope = list(lower = ~ AGE + diabetes + SYSBP))
+back1_male <- step(fullcox_male, direction = "backward", 
+                   scope = list(lower = ~ AGE + diabetes + SYSBP))
+#females final model did not select any risk factors of interest
+#males final model only selected cursmoker
+#BUT females model with cursmoker is only lower by .46 AIC so 
+#final models for both genders will be the same to make comparisons easier
+#in future inferential work
+final_mod_fem <- coxph(Surv(stroke_time_yrs, stroke_10) ~ AGE + diabetes +
+                         SYSBP + cursmoke, data = fram_mod_female)
+final_mod_male <- coxph(Surv(stroke_time_yrs, stroke_10) ~ AGE + diabetes +
+                          SYSBP + cursmoke, data = fram_mod_male)
+
+#==============
+#Proportion Hazards Check
+#==============
+#check proportional hazards assumption for each final model for females
+ph_res_fem <- cox.zph(final_mod_fem)
+ggcoxzph(ph_res_fem, se = F)
+#check proportional hazards assumption for each final model for males
+ph_res_male <- cox.zph(final_mod_male)
+ggcoxzph(ph_res_male, se = F)
+
+#==============
+#10 year Probability Risk Profiles
+#==============
+#Risk profile 1 values: baseline average
+mean_sysbp_f <- mean(fram_mod_female$SYSBP, na.rm = TRUE)
+mean_sysbp_m <- mean(fram_mod_male$SYSBP, na.rm = TRUE)
+
+#Female risk profiles table
+#create empty results
+res_fem <- matrix(NA, nrow = 5, ncol = 3)
+rownames(res_fem) <- c(
+  "Baseline",
+  "High BP (>=160)",
+  "Diabetes",
+  "High BP + Diabetes",
+  "Current Smoker"
+)
+
+colnames(res_fem) <- c("Age 40", "Age 50", "Age 60")
+
+ages <- c(40, 50, 60)
+
+for (i in 1:3) {
+  age_val <- ages[i]
+  
+  profiles <- list(
+    c(age_val, 0, mean_sysbp_f, 0), #baseline
+    c(age_val, 0, 160, 0), #high bp
+    c(age_val, 1, mean_sysbp_f, 0), #diabetes
+    c(age_val, 1, 160, 0), #hpb + diabetes
+    c(age_val, 0, mean_sysbp_f, 1) #smoker
+  )
+  for (j in 1:5) {
+    newdata <- data.frame(
+      AGE = profiles[[j]][1],
+      diabetes = factor(profiles[[j]][2], levels = c(0,1), labels = c("No","Yes")),
+      SYSBP = profiles[[j]][3],
+      cursmoke = factor(profiles[[j]][4], levels = c(0,1), labels = c("No","Yes"))
+    )
+    fit <- survfit(final_mod_fem, newdata = newdata)
+    surv_10 <- summary(fit, times = 10)$surv
+    res_fem[j, i] <- 1 - surv_10
+  }
+}
+
+res_fem_df <- as.data.frame(res_fem)
+res_fem_df <- round(res_fem_df, 3)
+
+
+#Male risk profiles table
+#create empty results
+res_male <- matrix(NA, nrow = 5, ncol = 3)
+rownames(res_male) <- c(
+  "Baseline",
+  "High BP (>=160)",
+  "Diabetes",
+  "High BP + Diabetes",
+  "Current Smoker"
+)
+
+colnames(res_male) <- c("Age 40", "Age 50", "Age 60")
+
+for (i in 1:3) {
+  age_val <- ages[i]
+  
+  profiles <- list(
+    c(age_val, 0, mean_sysbp_m, 0), #baseline
+    c(age_val, 0, 160, 0), #high bp
+    c(age_val, 1, mean_sysbp_m, 0), #diabetes
+    c(age_val, 1, 160, 0), #hpb + diabetes
+    c(age_val, 0, mean_sysbp_m, 1) #smoker
+  )
+  for (j in 1:5) {
+    newdata <- data.frame(
+      AGE = profiles[[j]][1],
+      diabetes = factor(profiles[[j]][2], levels = c(0,1), labels = c("No","Yes")),
+      SYSBP = profiles[[j]][3],
+      cursmoke = factor(profiles[[j]][4], levels = c(0,1), labels = c("No","Yes"))
+    )
+    fit <- survfit(final_mod_male, newdata = newdata)
+    surv_10 <- summary(fit, times = 10)$surv
+    res_male[j, i] <- 1 - surv_10
+  }
+}
+
+res_male_df <- as.data.frame(res_male)
+res_male_df <- round(res_male_df, 3)
+
+#==============
+#Change in Risk factors over 3 periods
+#==============
+
+# diabetes by period: n (%)
+diab_tab <- fram_long_desc %>%
+  group_by(period) %>%
+  summarise(
+    diab_n = sum(diabetes == "Yes", na.rm = TRUE),
+    diab_denom = sum(!is.na(diabetes)),
+    diabetes_stat = sprintf("%d (%.1f\\%%)", diab_n, 100 * diab_n / diab_denom)
+  ) %>%
+  select(period, diabetes_stat)
+
+# systolic blood pressure by period: mean (SD)
+sysbp_tab <- fram_long_desc %>%
+  group_by(period) %>%
+  summarise(
+    sysbp_stat = sprintf("%.1f (%.1f)",
+                         mean(SYSBP, na.rm = TRUE),
+                         sd(SYSBP, na.rm = TRUE))
+  ) %>%
+  select(period, sysbp_stat)
+
+# combine into one table
+change_tab <- data.frame(
+  `Risk Factor` = c("Diabetes, n (\\%)", "Systolic blood pressure, mean (SD)"),
+  `Exam 1` = c(
+    diab_tab$diabetes_stat[diab_tab$period == "Exam 1"],
+    sysbp_tab$sysbp_stat[sysbp_tab$period == "Exam 1"]
+  ),
+  `Exam 2` = c(
+    diab_tab$diabetes_stat[diab_tab$period == "Exam 2"],
+    sysbp_tab$sysbp_stat[sysbp_tab$period == "Exam 2"]
+  ),
+  `Exam 3` = c(
+    diab_tab$diabetes_stat[diab_tab$period == "Exam 3"],
+    sysbp_tab$sysbp_stat[sysbp_tab$period == "Exam 3"]
+  ),
+  check.names = FALSE
+)
+```
+
+# Introduction
+The Framingham Heart Study is a landmark prospective cohort study initiated in 1948 with 5,209 participants to investigate the causes and risk factors of cardiovascular disease. Participants have been followed biennially with detailed clinical assessments and surveillance for cardiovascular events. The study has been instrumental in identifying key risk factors and characterizing long-term outcomes such as heart disease and stroke. The dataset used for this project is a subset of the Framingham study and includes laboratory, clinical, questionnaire, and adjudicated event data on 4,434 participants collected across three examination periods from 1956 to 1968.
+
+The primary aim of this analysis is to identify baseline risk factors associated with stroke incidence and to estimate the 10-year probability of stroke across different risk profiles, stratified by sex. This will be accomplished using time-to-event methods, specifically Cox proportional hazards models, to evaluate associations between baseline covariates and the hazard of stroke. Statistically, this involves testing the null hypotheses that individual baseline risk factors are not associated with stroke risk (e.g., $H_0$: $\beta_j=0$). A secondary aim is to assess how selected risk factors change across the three examination periods. This component will be descriptive and will evaluate patterns in time-varying covariates, including diabetes status and systolic blood pressure, to assess whether more complex modeling approaches may be warranted. All analyses will be conducted separately for males and females.
+
+
+```{r, echo=FALSE, fig.cap= "Kaplan-Meier curves for stroke-free survival by sex and baseline risk factors"}
+km_plots
+```
+
+
+
+```{r, echo=FALSE}
+kable(
+  table1,
+  format = "latex",
+  booktabs = TRUE,
+  longtable = FALSE,
+  escape = FALSE,
+  align = c("l", "c", "c", "c"),
+  caption = "Baseline characteristics overall and stratified by sex."
+) %>%
+  kable_styling(
+    latex_options = c("hold_position"),
+    font_size = 10
+  )
+```
+
+
+```{r, echo=FALSE}
+kbl(
+  res_fem_df,
+  caption = "10-year probability of stroke (Females)",
+  booktabs = TRUE
+) %>%
+  kable_styling(latex_options = "hold_position")
+```
+
+
+```{r, echo= FALSE}
+kbl(
+  res_male_df,
+  caption = "10-year probability of stroke (Males)",
+  booktabs = TRUE
+) %>%
+  kable_styling(latex_options = "hold_position")
+```
+
+```{r, echo=FALSE}
+kbl(
+  change_tab,
+  format = "latex",
+  booktabs = TRUE,
+  escape = FALSE,
+  caption = "Changes in selected risk factors across examination periods."
+) %>%
+  kable_styling(latex_options = "hold_position")
+```
+
