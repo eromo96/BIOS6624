@@ -86,6 +86,7 @@ fram_mod_female <- fram_model %>%
   filter(sex == "Female")
 #create dataset for descriptive time varying covariate part
 fram_long_desc <- fram_data %>%
+  filter(PREVSTRK == 0) %>%
   select(RANDID, PERIOD, TIME, sex, AGE, diabetes, SYSBP) %>%
   mutate(
     time_yrs = TIME/365.25,
@@ -295,12 +296,12 @@ make_cat_block <- function(data, var, label) {
 # build table
 table1 <- bind_rows(
   make_cat_block(fram_base, "stroke_10_fac", "Stroke during follow-up"),
-  make_cont_block(fram_base, "stroke_time_yrs", "Follow-up time (years)"),
-  make_cont_block(fram_base, "AGE", "Age"),
-  make_cont_block(fram_base, "SYSBP", "Systolic blood pressure"),
+  make_cont_block(fram_base, "stroke_time_yrs", "Follow-up time in years (SD)"),
+  make_cont_block(fram_base, "AGE", "Age (SD)"),
+  make_cont_block(fram_base, "SYSBP", "Systolic blood pressure (SD)"),
   make_cat_block(fram_base, "bpmeds", "Blood pressure meds"),
-  make_cont_block(fram_base, "TOTCHOL", "Total cholesterol"),
-  make_cont_block(fram_base, "BMI", "BMI"),
+  make_cont_block(fram_base, "TOTCHOL", "Total cholesterol (SD)"),
+  make_cont_block(fram_base, "BMI", "BMI (SD)"),
   make_cat_block(fram_base, "diabetes", "Diabetes"),
   make_cat_block(fram_base, "prevchd", "Coronary heart disease"),
   make_cat_block(fram_base, "cursmoke", "Current smoker")
@@ -348,6 +349,41 @@ ggcoxzph(ph_res_fem, se = F)
 ph_res_male <- cox.zph(final_mod_male)
 ggcoxzph(ph_res_male, se = F)
 
+#========================
+# Extract model summaries
+#========================
+sum_fem <- summary(final_mod_fem)
+sum_male <- summary(final_mod_male)
+
+# female results
+fem_hr <- round(sum_fem$conf.int[, "exp(coef)"], 2)
+fem_lcl <- round(sum_fem$conf.int[, "lower .95"], 2)
+fem_ucl <- round(sum_fem$conf.int[, "upper .95"], 2)
+fem_p <- signif(sum_fem$coefficients[, "Pr(>|z|)"], 3)
+
+# male results
+male_hr <- round(sum_male$conf.int[, "exp(coef)"], 2)
+male_lcl <- round(sum_male$conf.int[, "lower .95"], 2)
+male_ucl <- round(sum_male$conf.int[, "upper .95"], 2)
+male_p <- signif(sum_male$coefficients[, "Pr(>|z|)"], 3)
+
+#========================
+# Build combined table
+#========================
+model_tab <- data.frame(
+  Variable = c("Age", "Diabetes", "Systolic Blood Pressure", "Smoking Status"),
+  
+  `HR` = male_hr,
+  `95\\% CI` = paste0(male_lcl, ", ", male_ucl),
+  `p-value` = round(male_p, 4),
+  
+  `HR ` = fem_hr,
+  `95\\% CI ` = paste0(fem_lcl, ", ", fem_ucl),
+  `p-value ` = round(fem_p, 4),
+  
+  check.names = FALSE
+)
+
 #==============
 #10 year Probability Risk Profiles
 #==============
@@ -388,13 +424,15 @@ for (i in 1:3) {
       cursmoke = factor(profiles[[j]][4], levels = c(0,1), labels = c("No","Yes"))
     )
     fit <- survfit(final_mod_fem, newdata = newdata)
-    surv_10 <- summary(fit, times = 10)$surv
-    res_fem[j, i] <- 1 - surv_10
+    s10 <- summary(fit, times = 10)
+    risk <- (1-s10$surv) * 100
+    risk_low <- (1-s10$upper) * 100
+    risk_up <- (1- s10$lower) * 100
+    res_fem[j, i] <- sprintf("%.1f (%.1f, %.1f)", risk, risk_low, risk_up)
   }
 }
 
 res_fem_df <- as.data.frame(res_fem)
-res_fem_df <- round(res_fem_df, 3)
 
 
 #Male risk profiles table
@@ -428,68 +466,164 @@ for (i in 1:3) {
       cursmoke = factor(profiles[[j]][4], levels = c(0,1), labels = c("No","Yes"))
     )
     fit <- survfit(final_mod_male, newdata = newdata)
-    surv_10 <- summary(fit, times = 10)$surv
-    res_male[j, i] <- 1 - surv_10
+    s10 <- summary(fit, times = 10)
+    risk <- (1-s10$surv) * 100
+    risk_low <- (1-s10$upper) * 100
+    risk_up <- (1- s10$lower) * 100
+    res_male[j, i] <- sprintf("%.1f (%.1f, %.1f)", risk, risk_low, risk_up)
   }
 }
 
 res_male_df <- as.data.frame(res_male)
-res_male_df <- round(res_male_df, 3)
 
-#==============
-#Change in Risk factors over 3 periods
-#==============
+#========================
+# Change in selected characteristics over 3 periods: Males
+#========================
+
+# number of observations by period
+n_tab_male <- fram_long_desc %>%
+  filter(sex == "Male") %>%
+  group_by(period) %>%
+  summarise(
+    n_stat = as.character(n()),
+    .groups = "drop"
+  ) %>%
+  select(period, n_stat)
 
 # diabetes by period: n (%)
-diab_tab <- fram_long_desc %>%
+diab_tab_male <- fram_long_desc %>%
+  filter(sex == "Male") %>%
   group_by(period) %>%
   summarise(
     diab_n = sum(diabetes == "Yes", na.rm = TRUE),
     diab_denom = sum(!is.na(diabetes)),
-    diabetes_stat = sprintf("%d (%.1f\\%%)", diab_n, 100 * diab_n / diab_denom)
+    diabetes_stat = sprintf("%d (%.1f\\%%)", diab_n, 100 * diab_n / diab_denom),
+    .groups = "drop"
   ) %>%
   select(period, diabetes_stat)
 
 # systolic blood pressure by period: mean (SD)
-sysbp_tab <- fram_long_desc %>%
+sysbp_tab_male <- fram_long_desc %>%
+  filter(sex == "Male") %>%
   group_by(period) %>%
   summarise(
     sysbp_stat = sprintf("%.1f (%.1f)",
                          mean(SYSBP, na.rm = TRUE),
-                         sd(SYSBP, na.rm = TRUE))
+                         sd(SYSBP, na.rm = TRUE)),
+    .groups = "drop"
   ) %>%
   select(period, sysbp_stat)
 
-# combine into one table
-change_tab <- data.frame(
-  `Risk Factor` = c("Diabetes, n (\\%)", "Systolic blood pressure, mean (SD)"),
+# combine male table
+change_tab_male <- data.frame(
+  Characteristic = c("Number of observations", "Diabetes, n (\\%)", "Systolic blood pressure, mean (SD)"),
+  Sex = c("Male", "Male", "Male"),
   `Exam 1` = c(
-    diab_tab$diabetes_stat[diab_tab$period == "Exam 1"],
-    sysbp_tab$sysbp_stat[sysbp_tab$period == "Exam 1"]
+    n_tab_male$n_stat[n_tab_male$period == "Exam 1"],
+    diab_tab_male$diabetes_stat[diab_tab_male$period == "Exam 1"],
+    sysbp_tab_male$sysbp_stat[sysbp_tab_male$period == "Exam 1"]
   ),
   `Exam 2` = c(
-    diab_tab$diabetes_stat[diab_tab$period == "Exam 2"],
-    sysbp_tab$sysbp_stat[sysbp_tab$period == "Exam 2"]
+    n_tab_male$n_stat[n_tab_male$period == "Exam 2"],
+    diab_tab_male$diabetes_stat[diab_tab_male$period == "Exam 2"],
+    sysbp_tab_male$sysbp_stat[sysbp_tab_male$period == "Exam 2"]
   ),
   `Exam 3` = c(
-    diab_tab$diabetes_stat[diab_tab$period == "Exam 3"],
-    sysbp_tab$sysbp_stat[sysbp_tab$period == "Exam 3"]
+    n_tab_male$n_stat[n_tab_male$period == "Exam 3"],
+    diab_tab_male$diabetes_stat[diab_tab_male$period == "Exam 3"],
+    sysbp_tab_male$sysbp_stat[sysbp_tab_male$period == "Exam 3"]
   ),
   check.names = FALSE
 )
+
+#========================
+# Change in selected characteristics over 3 periods: Females
+#========================
+
+# number of observations by period
+n_tab_female <- fram_long_desc %>%
+  filter(sex == "Female") %>%
+  group_by(period) %>%
+  summarise(
+    n_stat = as.character(n()),
+    .groups = "drop"
+  ) %>%
+  select(period, n_stat)
+
+# diabetes by period: n (%)
+diab_tab_female <- fram_long_desc %>%
+  filter(sex == "Female") %>%
+  group_by(period) %>%
+  summarise(
+    diab_n = sum(diabetes == "Yes", na.rm = TRUE),
+    diab_denom = sum(!is.na(diabetes)),
+    diabetes_stat = sprintf("%d (%.1f\\%%)", diab_n, 100 * diab_n / diab_denom),
+    .groups = "drop"
+  ) %>%
+  select(period, diabetes_stat)
+
+# systolic blood pressure by period: mean (SD)
+sysbp_tab_female <- fram_long_desc %>%
+  filter(sex == "Female") %>%
+  group_by(period) %>%
+  summarise(
+    sysbp_stat = sprintf("%.1f (%.1f)",
+                         mean(SYSBP, na.rm = TRUE),
+                         sd(SYSBP, na.rm = TRUE)),
+    .groups = "drop"
+  ) %>%
+  select(period, sysbp_stat)
+
+# combine female table
+change_tab_female <- data.frame(
+  Characteristic = c("Number of observations", "Diabetes, n (\\%)", "Systolic blood pressure, mean (SD)"),
+  Sex = c("Female", "Female", "Female"),
+  `Exam 1` = c(
+    n_tab_female$n_stat[n_tab_female$period == "Exam 1"],
+    diab_tab_female$diabetes_stat[diab_tab_female$period == "Exam 1"],
+    sysbp_tab_female$sysbp_stat[sysbp_tab_female$period == "Exam 1"]
+  ),
+  `Exam 2` = c(
+    n_tab_female$n_stat[n_tab_female$period == "Exam 2"],
+    diab_tab_female$diabetes_stat[diab_tab_female$period == "Exam 2"],
+    sysbp_tab_female$sysbp_stat[sysbp_tab_female$period == "Exam 2"]
+  ),
+  `Exam 3` = c(
+    n_tab_female$n_stat[n_tab_female$period == "Exam 3"],
+    diab_tab_female$diabetes_stat[diab_tab_female$period == "Exam 3"],
+    sysbp_tab_female$sysbp_stat[sysbp_tab_female$period == "Exam 3"]
+  ),
+  check.names = FALSE
+)
+
+#========================
+# Combine into one table
+#========================
+
+change_tab_combined <- bind_rows(change_tab_male, change_tab_female) %>%
+  arrange(Characteristic, Sex)
 ```
 
 # Introduction
-The Framingham Heart Study is a landmark prospective cohort study initiated in 1948 with 5,209 participants to investigate the causes and risk factors of cardiovascular disease. Participants have been followed biennially with detailed clinical assessments and surveillance for cardiovascular events. The study has been instrumental in identifying key risk factors and characterizing long-term outcomes such as heart disease and stroke. The dataset used for this project is a subset of the Framingham study and includes laboratory, clinical, questionnaire, and adjudicated event data on 4,434 participants collected across three examination periods from 1956 to 1968.
+The Framingham Heart Study is a landmark prospective cohort study initiated in 1948 to investigate cardiovascular disease risk factors. Participants were followed biennially with detailed clinical assessments and surveillance for cardiovascular events. The dataset used in this analysis includes 4,434 participants with laboratory, clinical, questionnaire, and adjudicated event data collected across three examination periods from 1956 to 1968.
 
-The primary aim of this analysis is to identify baseline risk factors associated with stroke incidence and to estimate the 10-year probability of stroke across different risk profiles, stratified by sex. This will be accomplished using time-to-event methods, specifically Cox proportional hazards models, to evaluate associations between baseline covariates and the hazard of stroke. Statistically, this involves testing the null hypotheses that individual baseline risk factors are not associated with stroke risk (e.g., $H_0$: $\beta_j=0$). A secondary aim is to assess how selected risk factors change across the three examination periods. This component will be descriptive and will evaluate patterns in time-varying covariates, including diabetes status and systolic blood pressure, to assess whether more complex modeling approaches may be warranted. All analyses will be conducted separately for males and females.
+The primary aim of this analysis is to identify baseline risk factors associated with stroke incidence and to estimate 10-year stroke probability across clinically relevant risk profiles, stratified by sex. Risk profiles include individuals with average baseline risk factors, high systolic blood pressure ($\ge160$ mmHg), diabetes, both high blood pressure and diabetes, and current smoking status, evaluated at ages 40, 50, and 60. Cox proportional hazards models were used to evaluate associations between baseline covariates and stroke risk, with AIC-based backward selection used to identify additional predictors. A secondary aim was to descriptively assess changes in diabetes and systolic blood pressure across examination periods to evaluate potential time-varying effects.
 
+# Methods
+The Framingham dataset is longitudinal, with participants contributing up to three observations across examination periods, resulting in 11,627 total records. For the primary analysis, the dataset was restricted to baseline measurements from the first examination period, yielding 4,434 unique participants. Participants with prevalent stroke at baseline were excluded (n = 32), resulting in a final analytic sample of 4,402 individuals. Because the objective was the evaluate baseline risk factors for incident stroke, only baseline covariates were used in the primary analysis. For the secondary exploratory analysis, we used all three examination periods excluding participants with prevalent stroke at baseline yielding 11,475 records.
 
-```{r, echo=FALSE, fig.cap= "Kaplan-Meier curves for stroke-free survival by sex and baseline risk factors"}
-km_plots
-```
+The outcome of interest was time to first stroke within 10 years of follow-up. Follow-up time was defined using the time-to-stroke variable (in days) and was restricted to the first 10 years. Participants who experienced a stroke within 10 years were classified as having the event, while those who did not were censored at 10 years or at their observed follow-up time if shorter. Time was converted from days to years using 365.25 days per year. 
 
+Baseline covariates included age, systolic blood pressure, diabetes status, use of blood pressure medication, current smoking status, total cholesterol, body mass index (BMI), and history of coronary heart disease. All covariates were measured at baseline and treated as fixed. Categorical variables were coded as binary indicators, and continuous variables were retained on their original scales. Missing data were assessed for all variables included in the analysis. A complete-case approach was used for modeling, resulting in a final anlytic sample of 4,275 particpants.
 
+Baseline characteristics were summarized overall and by sex using means (SD) for continuous variables and counts (percentages) for categorical variables. Kaplan–Meier curves were used to estimate stroke-free survival across selected risk factors.
+
+Cox proportional hazards models were used to evaluate the association between baseline covariates and the hazard of stroke. Models were fit separately for males and females. Age, diabetes status, and systolic blood pressure were included in all models a priori due to their established clinical importance. Variable selection was performed using a backward selection approach based on the Akaiki Information Criterion (AIC) to identify additional predictors from teh following candidate variables: coronary heart disease, use of blood pressure medication, current smoking status, total cholesterol, and BMI. The final models therefore included age, diabetes, systolic blood pressure, and any additional variables retained through the selection process. The proportional hazards assumption was assessed using Schoenfield residuals and graphical diagnostics. Predicted 10-year stroke probabilities were obtained from the fitted Cox models for selected risk profiles and calculated as one minus the estimated survival probability at 10 years.
+
+A secondary descriptive analysis investigated changes in diabetes status and systolic blood pressure across the three examination periods to assess within-individual variability over time and to evaluate the potential need for time-varying covariate models in future analyses. 
+
+# Results
+Baseline characteristics of the study population stratified by sex are summarized in Table 1. The analytic sample included 4,402 participants, with 1,930 males and 2,472 females. The overall 10-year stroke incidence was low (2.5%) and similar between males and females. Participants were on average 50 years old with similar age distributions across sexes. Females had slightly higher systolic blood pressure, while coronary heart disease and smoking were more prevalent among males. Diabetes prevalence was low and similar between groups. Missingness was minimal, with 2.9% of participants having at least one missing covariate, resulting in a complete-case sample of 4,275 individuals. Missingness patterns were similar across sexes.
 
 ```{r, echo=FALSE}
 kable(
@@ -507,11 +641,41 @@ kable(
   )
 ```
 
+Kaplan-Meier curves for stroke-free survival stratified by baseline risk factors and sex are shown in Figure 1. Across both sexes, individuals with coronary heart disease and those using blood pressure medications demonstrated lower stroke-free survival over time. Differences were also observed for elevated systolic blood pressure and higher total cholesterol. Smoking showed minimal separation in survival curves, particularly among males.
+
+```{r, echo=FALSE, fig.cap= "Kaplan-Meier curves for stroke-free survival by sex and baseline risk factors"}
+km_plots
+```
+
+Backward selection based on AIC was performed separately for males and females. Among females, none of the candidate risk factors (coronary heart disease, blood pressure medication use, current smoking, total cholesterol, and BMI) were retained in the final model beyond the variables specified a priori. Among males, current smoking was selected as an additional predictor. However, the improvement in model fit for females when including current smoking was minimal ($\Delta AIC=0.46$), so the final models for both sexes included age, diabetes, systolic blood pressure, and current smoking status to facilitate comparison.
+
+As shown in Table 2, age and systolic blood pressure were statistically significant predictors of stroke in both sexes. Each one-year increase in age and higher systolic blood pressure were associated with increased hazard in both males and females. Diabetes showed the strongest association among males (HR = 4.81, 95% CI: 2.10–11.00), but was not statistically significant among females. Current smoking was associated with increased risk among males but not females.
+
+```{r, echo=FALSE}
+kbl(
+  model_tab,
+  row.names = FALSE,
+  format = "latex",
+  booktabs = TRUE,
+  align = c("l", "c", "c", "c", "c", "c", "c"),
+  caption = "Hazard ratios, 95\\% confidence intervals, and p-values from sex-specific Cox proportional hazards models.",
+  escape = FALSE
+) %>%
+  add_header_above(c(" " = 1, "Males" = 3, "Females" = 3)) %>%
+  kable_styling(
+    latex_options = "hold_position",
+    font_size = 10
+  )
+```
+
+
+Predicted 10-year probabilities of stroke for selected risk profiles are presented in Tables 3 and 4 for females and males, respectively. Across both sexes, predicted stroke probability increased with age and the presence of risk factors. Among females, 10-year stroke probability under baseline conditions increased from 0.6% (95% CI: 0.1% - 1.0%) at age 40 to 2.5% (95% CI: 1.4% - 3.6%) at age 60. High systolic blood pressure and diabetes were each associated with increased risk, with their combination producing the highest probabilities. For example, among females aged 60, predicted risk increased from 2.5% to 8.7% (95% CI: 0.0% - 16.7%) for individuals with both conditions. A similar pattern was observed among males, but with larger magnitudes; males aged 60 with both conditions had a predicted risk of 22.3% (95% CI: 5.4% - 36.2%). Smoking was associated with increased risk in both sexes, although its effect was smaller than that of blood pressure and diabetes.
+
 
 ```{r, echo=FALSE}
 kbl(
   res_fem_df,
-  caption = "10-year probability of stroke (Females)",
+  caption = "10-year probability of stroke (95\\% CI) for Females",
   booktabs = TRUE
 ) %>%
   kable_styling(latex_options = "hold_position")
@@ -521,20 +685,41 @@ kbl(
 ```{r, echo= FALSE}
 kbl(
   res_male_df,
-  caption = "10-year probability of stroke (Males)",
+  caption = "10-year probability of stroke (95\\% CI) for Males",
   booktabs = TRUE
 ) %>%
   kable_styling(latex_options = "hold_position")
 ```
 
+The longitudinal descriptive analysis of diabetes and systolic blood pressure are presented in Tables 4 and 5 for males and females, respectively. The prevalence of diabetes increased over the three examination periods for both males and females. For males, diabetes prevalence rose from 3.0% at Exam 1 to 8.7% at Exam 3, while among females it increased from 2.5% to 7.1%. Mean systolic blood pressure also increased across examination periods in both groups, with males increasing from 131.7 mmHg to 139.3 mmHg and females from 133.8 mmHg to 140.9 mmHg. 
+
 ```{r, echo=FALSE}
 kbl(
-  change_tab,
+  change_tab_combined,
   format = "latex",
   booktabs = TRUE,
   escape = FALSE,
-  caption = "Changes in selected risk factors across examination periods."
+  caption = "Changes in selected characteristics across examination periods by sex."
 ) %>%
-  kable_styling(latex_options = "hold_position")
+  kable_styling(latex_options = "hold_position") %>%
+  collapse_rows(1)
 ```
 
+# Discussion
+Stroke incidence over the 10-year follow-up period was low, and risk increased with age and key cardiovascular risk factors. Elevated systolic blood pressure and diabetes were consistently associated with higher predicted stroke risk, with their combination producing the largest increases across both sexes. These findings are consistent with established evidence identifying hypertension and diabetes as major contributors to stroke.
+
+Predicted risk increased across ages 40 to 60 and was highest among individuals with both high blood pressure and diabetes, particularly among males. Smoking was associated with increased risk in both sexes, although its effect was smaller relative to blood pressure and diabetes. These patterns were consistent with the Cox model results, where age and systolic blood pressure were significant predictors in both sexes. Diabetes showed the strongest association among males, while its effect among females was weaker and not statistically significant.
+
+Variable selection differed slightly by sex, but a common model was used for comparability. A limitation of this approach is the use of backward selection based on AIC, which is a simple and data-driven method. Although computationally efficient, AIC-based selection does not provide a clear threshold for meaningful improvements in model fit and may yield unstable results, particularly with a limited number of events. More robust approaches, such as penalized regression methods, could be considered in future analyses.
+
+The proportional hazards assumption was assessed using Schoenfeld residuals and was not violated for either sex. Global tests were not statistically significant for females (p = 0.98) or males (p = 0.35), and there was no strong evidence of effects for individual covariates, although diabetes among males showed a borderline result (p = 0.097). Overall, these results support the appropriateness of the Cox proportional hazards model for this analysis.
+
+A main limitation is the relatively young cohort. The mean baseline age was approximately 50 years, corresponding to an average age of 60 at the end of follow-up, whereas first stroke typically occurs in the early to mid-70s. This likely contributed to the low incidence of stroke and reduced power to detect associations. Additional limitations include complete-case analysis and the use of baseline covariates only, despite observed increases in diabetes and systolic blood pressure over time.
+
+In conclusion, age, systolic blood pressure, and diabetes were important predictors of stroke risk, with combined risk factors substantially increasing predicted 10-year probabilities. Future studies with longer follow-up and time-varying modeling approaches are warranted.
+
+\newpage
+# Reproducible Research Information
+https://github.com/eromo96/BIOS6624.git
+
+Data Location: /Users/eduardo/Eduardo/UColorado PhD Bios/Spring 26/BIOS6624 Advanced Statistical Methods/BIOS6624/Project3/Data

@@ -56,6 +56,7 @@ fram_mod_female <- fram_model %>%
   filter(sex == "Female")
 #create dataset for descriptive time varying covariate part
 fram_long_desc <- fram_data %>%
+  filter(PREVSTRK == 0) %>%
   select(RANDID, PERIOD, TIME, sex, AGE, diabetes, SYSBP) %>%
   mutate(
     time_yrs = TIME/365.25,

@@ -38,6 +38,41 @@ ggcoxzph(ph_res_fem, se = F)
 ph_res_male <- cox.zph(final_mod_male)
 ggcoxzph(ph_res_male, se = F)
 
+#========================
+# Extract model summaries
+#========================
+sum_fem <- summary(final_mod_fem)
+sum_male <- summary(final_mod_male)
+
+# female results
+fem_hr <- round(sum_fem$conf.int[, "exp(coef)"], 2)
+fem_lcl <- round(sum_fem$conf.int[, "lower .95"], 2)
+fem_ucl <- round(sum_fem$conf.int[, "upper .95"], 2)
+fem_p <- signif(sum_fem$coefficients[, "Pr(>|z|)"], 3)
+
+# male results
+male_hr <- round(sum_male$conf.int[, "exp(coef)"], 2)
+male_lcl <- round(sum_male$conf.int[, "lower .95"], 2)
+male_ucl <- round(sum_male$conf.int[, "upper .95"], 2)
+male_p <- signif(sum_male$coefficients[, "Pr(>|z|)"], 3)
+
+#========================
+# Build combined table
+#========================
+model_tab <- data.frame(
+  Variable = c("Age", "Diabetes", "Systolic Blood Pressure", "Smoking Status"),
+  
+  `HR` = male_hr,
+  `95\\% CI` = paste0(male_lcl, ", ", male_ucl),
+  `p-value` = round(male_p, 4),
+  
+  `HR ` = fem_hr,
+  `95\\% CI ` = paste0(fem_lcl, ", ", fem_ucl),
+  `p-value ` = round(fem_p, 4),
+  
+  check.names = FALSE
+)
+
 #==============
 #10 year Probability Risk Profiles
 #==============
@@ -78,13 +113,15 @@ for (i in 1:3) {
       cursmoke = factor(profiles[[j]][4], levels = c(0,1), labels = c("No","Yes"))
     )
     fit <- survfit(final_mod_fem, newdata = newdata)
-    surv_10 <- summary(fit, times = 10)$surv
-    res_fem[j, i] <- 1 - surv_10
+    s10 <- summary(fit, times = 10)
+    risk <- (1-s10$surv) * 100
+    risk_low <- (1-s10$upper) * 100
+    risk_up <- (1- s10$lower) * 100
+    res_fem[j, i] <- sprintf("%.1f (%.1f, %.1f)", risk, risk_low, risk_up)
   }
 }
 
 res_fem_df <- as.data.frame(res_fem)
-res_fem_df <- round(res_fem_df, 3)
 
 
 #Male risk profiles table
@@ -118,54 +155,106 @@ for (i in 1:3) {
       cursmoke = factor(profiles[[j]][4], levels = c(0,1), labels = c("No","Yes"))
     )
     fit <- survfit(final_mod_male, newdata = newdata)
-    surv_10 <- summary(fit, times = 10)$surv
-    res_male[j, i] <- 1 - surv_10
+    s10 <- summary(fit, times = 10)
+    risk <- (1-s10$surv) * 100
+    risk_low <- (1-s10$upper) * 100
+    risk_up <- (1- s10$lower) * 100
+    res_male[j, i] <- sprintf("%.1f (%.1f, %.1f)", risk, risk_low, risk_up)
   }
 }
 
 res_male_df <- as.data.frame(res_male)
-res_male_df <- round(res_male_df, 3)
 
 
 
-#==============
-#Change in Risk factors over 3 periods
-#==============
+#========================
+# Change in risk factors over 3 periods: Males
+#========================
 
 # diabetes by period: n (%)
-diab_tab <- fram_long_desc %>%
+diab_tab_male <- fram_long_desc %>%
+  filter(sex == "Male") %>%
   group_by(period) %>%
   summarise(
     diab_n = sum(diabetes == "Yes", na.rm = TRUE),
     diab_denom = sum(!is.na(diabetes)),
-    diabetes_stat = sprintf("%d (%.1f\\%%)", diab_n, 100 * diab_n / diab_denom)
+    diabetes_stat = sprintf("%d (%.1f\\%%)", diab_n, 100 * diab_n / diab_denom),
+    .groups = "drop"
   ) %>%
   select(period, diabetes_stat)
 
 # systolic blood pressure by period: mean (SD)
-sysbp_tab <- fram_long_desc %>%
+sysbp_tab_male <- fram_long_desc %>%
+  filter(sex == "Male") %>%
   group_by(period) %>%
   summarise(
     sysbp_stat = sprintf("%.1f (%.1f)",
                          mean(SYSBP, na.rm = TRUE),
-                         sd(SYSBP, na.rm = TRUE))
+                         sd(SYSBP, na.rm = TRUE)),
+    .groups = "drop"
   ) %>%
   select(period, sysbp_stat)
 
 # combine into one table
-change_tab <- data.frame(
+change_tab_male <- data.frame(
   `Risk Factor` = c("Diabetes, n (\\%)", "Systolic blood pressure, mean (SD)"),
   `Exam 1` = c(
-    diab_tab$diabetes_stat[diab_tab$period == "Exam 1"],
-    sysbp_tab$sysbp_stat[sysbp_tab$period == "Exam 1"]
+    diab_tab_male$diabetes_stat[diab_tab_male$period == "Exam 1"],
+    sysbp_tab_male$sysbp_stat[sysbp_tab_male$period == "Exam 1"]
   ),
   `Exam 2` = c(
-    diab_tab$diabetes_stat[diab_tab$period == "Exam 2"],
-    sysbp_tab$sysbp_stat[sysbp_tab$period == "Exam 2"]
+    diab_tab_male$diabetes_stat[diab_tab_male$period == "Exam 2"],
+    sysbp_tab_male$sysbp_stat[sysbp_tab_male$period == "Exam 2"]
   ),
   `Exam 3` = c(
-    diab_tab$diabetes_stat[diab_tab$period == "Exam 3"],
-    sysbp_tab$sysbp_stat[sysbp_tab$period == "Exam 3"]
+    diab_tab_male$diabetes_stat[diab_tab_male$period == "Exam 3"],
+    sysbp_tab_male$sysbp_stat[sysbp_tab_male$period == "Exam 3"]
+  ),
+  check.names = FALSE
+)
+
+#========================
+# Change in risk factors over 3 periods: Females
+#========================
+
+# diabetes by period: n (%)
+diab_tab_female <- fram_long_desc %>%
+  filter(sex == "Female") %>%
+  group_by(period) %>%
+  summarise(
+    diab_n = sum(diabetes == "Yes", na.rm = TRUE),
+    diab_denom = sum(!is.na(diabetes)),
+    diabetes_stat = sprintf("%d (%.1f\\%%)", diab_n, 100 * diab_n / diab_denom),
+    .groups = "drop"
+  ) %>%
+  select(period, diabetes_stat)
+
+# systolic blood pressure by period: mean (SD)
+sysbp_tab_female <- fram_long_desc %>%
+  filter(sex == "Female") %>%
+  group_by(period) %>%
+  summarise(
+    sysbp_stat = sprintf("%.1f (%.1f)",
+                         mean(SYSBP, na.rm = TRUE),
+                         sd(SYSBP, na.rm = TRUE)),
+    .groups = "drop"
+  ) %>%
+  select(period, sysbp_stat)
+
+# combine into one table
+change_tab_female <- data.frame(
+  `Risk Factor` = c("Diabetes, n (\\%)", "Systolic blood pressure, mean (SD)"),
+  `Exam 1` = c(
+    diab_tab_female$diabetes_stat[diab_tab_female$period == "Exam 1"],
+    sysbp_tab_female$sysbp_stat[sysbp_tab_female$period == "Exam 1"]
+  ),
+  `Exam 2` = c(
+    diab_tab_female$diabetes_stat[diab_tab_female$period == "Exam 2"],
+    sysbp_tab_female$sysbp_stat[sysbp_tab_female$period == "Exam 2"]
+  ),
+  `Exam 3` = c(
+    diab_tab_female$diabetes_stat[diab_tab_female$period == "Exam 3"],
+    sysbp_tab_female$sysbp_stat[sysbp_tab_female$period == "Exam 3"]
   ),
   check.names = FALSE
 )
