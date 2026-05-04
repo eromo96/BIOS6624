@@ -11,23 +11,11 @@ library(tidyverse)
 #test out gen_data function from hdmr
 # testdata<- hdrm::gen_data(100, 10, 5)
 
-#set seed for reproducibility
-set.seed(6624)
-
-#data generating parameters
-n_vals <- c(250, 500)
-rho_vals <- c(0, 0.35, 0.7)
-true_betas <- c(seq(0.5/3, 2.5/3, 0.5/3), rep(0, 15))
-p <- 20
-p1 <- 5
-nreps <- 10000
-
-
-true_vars <- paste0("X", 1:5)
-noise_vars <- paste0("X", 6:20)
+# Global variable names
+x_vars <- paste0("X", 1:20)
 
 #data generating function
-gen_dataset <- function(n, rho) {
+gen_dataset <- function(n, rho, p = 20, p1 = 5, true_betas) {
   #use gen_data function from hdmr package
   dat <- hdrm::gen_data(
     n = n,
@@ -40,7 +28,7 @@ gen_dataset <- function(n, rho) {
   )
   
   X <- as.data.frame(dat$X)
-  names(X) <- paste0("X", 1:20)
+  names(X) <- paste0("X", 1:p)
   
   sim_dat <- data.frame(
     y = dat$y,
@@ -50,104 +38,137 @@ gen_dataset <- function(n, rho) {
 }
 
 #function that refits selected variables from model selection method with lm()
-refit_extract <- function(sim_dat, selected_vars, method_name, n, rho, rep_id) {
-  if(length(selected_vars) == 0) {
-    print("No variables selected")
-  }
+refit_extract <- function(sim_dat, selected_vars, method, n, rho, rep_id, true_betas) {
   
-  #build formula with no intercept
-  form <- as.formula(paste("y ~ 0 +", paste(selected_vars, collapse = " + ")))
+  all_vars <- paste0("X", seq_along(true_betas))
   
-  #refit final model
-  final_fit <- lm(formula = form, data = sim_dat)
-  
-  #extract coefficient table
-  coefs_df <- broom::tidy(final_fit, conf.int = TRUE)
-  
-  #create compact results df
-  results <- data.frame(
+  # Base output: one row for every variable
+  results <- tibble(
     rep_id = rep_id,
     n = n,
     rho = rho,
-    method_name = method_name,
-    variable = coefs_df$term,
-    estimate = coefs_df$estimate,
-    p_value = coefs_df$p.value,
-    ci_low = coefs_df$conf.low,
-    ci_hi = coefs_df$conf.high,
-    selected = TRUE
+    method = method,
+    variable = all_vars,
+    selected = variable %in% selected_vars,
+    estimate = NA_real_,
+    p_value = NA_real_,
+    ci_low = NA_real_,
+    ci_hi = NA_real_,
+    true_beta = true_betas
   )
+  
+  # If no variables selected, return all rows with selected = FALSE
+  if (length(selected_vars) == 0) {
+    return(results)
+  }
+  
+  # Refit final no-intercept model
+  form <- as.formula(
+    paste("y ~ 0 +", paste(selected_vars, collapse = " + "))
+  )
+  
+  final_fit <- lm(form, data = sim_dat)
+  
+  coefs_df <- broom::tidy(final_fit, conf.int = TRUE) %>%
+    rename(
+      variable = term,
+      ci_low = conf.low,
+      ci_hi = conf.high,
+      p_value = p.value
+    ) %>%
+    select(variable, estimate, p_value, ci_low, ci_hi)
+  
+  # Join estimates back onto all 20 variables
+  results <- results %>%
+    select(-estimate, -p_value, -ci_low, -ci_hi) %>%
+    left_join(coefs_df, by = "variable")
+  
   return(results)
 }
 
 #function for backward selection using F-test p-values
 select_backward_p <- function(sim_dat, p_thresh = 0.15) {
   #start with full no-intercept model
-  current_vars <- paste0("X", 1:20)
-  continue <- TRUE
-  while (continue) {
-    #fit current model
-    form <- as.formula(paste("y ~ 0 +", paste(current_vars, collapse = " + ")))
+  current_vars <- x_vars
+  while (length(current_vars) > 0) {
+    
+    form <- as.formula(
+      paste("y ~ 0 +", paste(current_vars, collapse = " + "))
+    )
+    
     fit <- lm(form, data = sim_dat)
     pvals <- summary(fit)$coefficients[, "Pr(>|t|)"]
-    max_p <- max(pvals)
-    #if max p is less than threshold then all vars are sig so stop selection
-    if(max_p <= p_thresh) {
-      continue <- FALSE
+    
+    max_p <- max(pvals, na.rm = TRUE)
+    
+    if (max_p <= p_thresh) {
+      break
     }
-    else {
-      var_remove <- names(which.max(pvals))
-      current_vars <- setdiff(current_vars, var_remove)
-    }
-    if(length(current_vars) == 0) {
-      continue <- FALSE
-    }
+    
+    var_remove <- names(which.max(pvals))
+    current_vars <- setdiff(current_vars, var_remove)
   }
   return(current_vars)
 }
 
 #function for aic backward selection
 select_backward_aic <- function(sim_dat) {
-  all_vars <- paste0("X", 1:20)
-  full_fit <- lm(formula = as.formula(paste("y ~ 0 +", paste(all_vars, collapse = " + "))),
-                 data = sim_dat)
+  
+  full_fit <- lm(
+    as.formula(paste("y ~ 0 +", paste(x_vars, collapse = " + "))),
+    data = sim_dat
+  )
+  
   null_fit <- lm(y ~ 0, data = sim_dat)
-  #backward selection via aic
+  
   step_fit <- step(
     full_fit,
-    scope = list(lower = formula(null_fit), upper = formula(full_fit)),
+    scope = list(
+      lower = formula(null_fit),
+      upper = formula(full_fit)
+    ),
     direction = "backward",
+    k = 2,
     trace = 0
   )
-  #extract coefficients
+  
   selected_vars <- names(coef(step_fit))
   return(selected_vars)
 }
 
 #function for bic backward selection
 select_backward_bic <- function(sim_dat) {
+  
   n <- nrow(sim_dat)
-  all_vars <- paste0("X", 1:20)
-  full_fit <- lm(formula = as.formula(paste("y ~ 0 +", paste(all_vars, collapse = " + "))),
-                 data = sim_dat)
+  
+  full_fit <- lm(
+    as.formula(paste("y ~ 0 +", paste(x_vars, collapse = " + "))),
+    data = sim_dat
+  )
+  
   null_fit <- lm(y ~ 0, data = sim_dat)
-  #backward selection via aic
+  
   step_fit <- step(
     full_fit,
-    scope = list(lower = formula(null_fit), upper = formula(full_fit)),
+    scope = list(
+      lower = formula(null_fit),
+      upper = formula(full_fit)
+    ),
     direction = "backward",
-    trace = 0,
-    k = log(n)
+    k = log(n),
+    trace = 0
   )
-  #extract coefficients
+  
   selected_vars <- names(coef(step_fit))
   return(selected_vars)
 }
 
-#function for lasso using cv.glmnet with alpha = 1
-select_lasso <- function(sim_dat, lambda_choice) {
-  X <- as.matrix(sim_dat[, paste0("X", 1:20)])
+# Fit lasso once and extract lambda.min and lambda.1se
+select_lasso_both <- function(sim_dat) {
+  
+  X <- as.matrix(sim_dat[, x_vars])
   y <- sim_dat$y
+  
   cv_fit <- cv.glmnet(
     x = X,
     y = y,
@@ -156,24 +177,22 @@ select_lasso <- function(sim_dat, lambda_choice) {
     intercept = FALSE,
     standardize = TRUE
   )
-  if(lambda_choice == "lambda.min") {
-    lambda_use <- cv_fit$lambda.min
-  }
-  if(lambda_choice == "lambda.1se") {
-    lambda_use <- cv_fit$lambda.1se
-  }
-  beta_hat <- coef(cv_fit, s = lambda_use)
   
-  #remove intercept row
-  beta_hat <- beta_hat[-1, ]
-  selected_vars <- names(beta_hat[beta_hat != 0])
-  return(selected_vars)
+  beta_min <- as.matrix(coef(cv_fit, s = "lambda.min"))[-1, , drop = FALSE]
+  beta_1se <- as.matrix(coef(cv_fit, s = "lambda.1se"))[-1, , drop = FALSE]
+  
+  list(
+    lasso_min = rownames(beta_min)[beta_min[, 1] != 0],
+    lasso_1se = rownames(beta_1se)[beta_1se[, 1] != 0]
+  )
 }
 
-#function for elastic net
-select_elastic_net <- function(sim_dat, lambda_choice) {
-  X <- as.matrix(sim_dat[, paste0("X", 1:20)])
+# Fit elastic net once and extract lambda.min and lambda.1se
+select_enet_both <- function(sim_dat) {
+  
+  X <- as.matrix(sim_dat[, x_vars])
   y <- sim_dat$y
+  
   cv_fit <- cv.glmnet(
     x = X,
     y = y,
@@ -182,21 +201,68 @@ select_elastic_net <- function(sim_dat, lambda_choice) {
     intercept = FALSE,
     standardize = TRUE
   )
-  if(lambda_choice == "lambda.min") {
-    lambda_use <- cv_fit$lambda.min
-  }
-  if(lambda_choice == "lambda.1se") {
-    lambda_use <- cv_fit$lambda.1se
-  }
-  beta_hat <- coef(cv_fit, s = lambda_use)
   
-  #remove intercept row
-  beta_hat <- beta_hat[-1, ]
-  selected_vars <- names(beta_hat[beta_hat != 0])
-  return(selected_vars)
+  beta_min <- as.matrix(coef(cv_fit, s = "lambda.min"))[-1, , drop = FALSE]
+  beta_1se <- as.matrix(coef(cv_fit, s = "lambda.1se"))[-1, , drop = FALSE]
+  
+  list(
+    enet_min = rownames(beta_min)[beta_min[, 1] != 0],
+    enet_1se = rownames(beta_1se)[beta_1se[, 1] != 0]
+  )
 }
 
 #function to run all model selection methods on one simulated dataset
-run_one_rep <- function(rep_id, n, rho) {
+run_one_rep <- function(rep_id, n, rho, true_betas, p = 20, p1 = 5) {
   
+  sim_dat <- gen_dataset(
+    n = n,
+    rho = rho,
+    p = p,
+    p1 = p1,
+    true_betas = true_betas
+  )
+  
+  all_results <- list()
+  
+  # Backward p-value
+  selected <- select_backward_p(sim_dat, p_thresh = 0.15)
+  all_results[["backward_pvalue"]] <- refit_extract(
+    sim_dat, selected, "backward_pvalue", n, rho, rep_id, true_betas
+  )
+  
+  # Backward AIC
+  selected <- select_backward_aic(sim_dat)
+  all_results[["backward_aic"]] <- refit_extract(
+    sim_dat, selected, "backward_aic", n, rho, rep_id, true_betas
+  )
+  
+  # Backward BIC
+  selected <- select_backward_bic(sim_dat)
+  all_results[["backward_bic"]] <- refit_extract(
+    sim_dat, selected, "backward_bic", n, rho, rep_id, true_betas
+  )
+  
+  # Lasso
+  lasso_selected <- select_lasso_both(sim_dat)
+  
+  all_results[["lasso_min"]] <- refit_extract(
+    sim_dat, lasso_selected$lasso_min, "lasso_min", n, rho, rep_id, true_betas
+  )
+  
+  all_results[["lasso_1se"]] <- refit_extract(
+    sim_dat, lasso_selected$lasso_1se, "lasso_1se", n, rho, rep_id, true_betas
+  )
+  
+  # Elastic net
+  enet_selected <- select_enet_both(sim_dat)
+  
+  all_results[["enet_min"]] <- refit_extract(
+    sim_dat, enet_selected$enet_min, "enet_min", n, rho, rep_id, true_betas
+  )
+  
+  all_results[["enet_1se"]] <- refit_extract(
+    sim_dat, enet_selected$enet_1se, "enet_1se", n, rho, rep_id, true_betas
+  )
+  
+  bind_rows(all_results)
 }

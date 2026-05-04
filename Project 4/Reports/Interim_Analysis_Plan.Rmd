@@ -1,0 +1,36 @@
+---
+title: "Project4: Interim Data Analysis Plan"
+author: "Eduardo Romo"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    number_sections: false
+    toc: false
+fontsize: 12pt
+geometry: margin=1in
+header-includes:
+  - \usepackage{setspace}
+  - \doublespacing
+  - \usepackage{float}
+  - \usepackage{graphicx}
+  - \floatplacement{figure}{H}
+  - \floatplacement{table}{H}
+  - \setlength{\parindent}{2em}
+  - \setlength{\parskip}{0pt}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, message = FALSE, warning = FALSE,
+  fig.align = "center", fig.width = 6.5, fig.height = 4.5
+)
+
+```
+
+# Introduction
+Linear regression is widely used to model the relationship between an outcome variable and a set of predictors. In moderate- to high-dimensional settings, variable selection becomes critical for accurately quantifying these relationships. Variable selection refers to identifying a subset of relevant predictors to include in a statistical model. This is important for both statisticians and collaborators, as including irrelevant variables can increase variance, lead to overfitting, and reduce interpretability, while excluding important variables can introduce bias and result in incorrect inference. A variety of variable selection methods have been developed, differing in both their procedures and performance. Classical approaches, such as backward selection, rely on stepwise regression techniques that begin with a full model and iteratively remove variables based on criteria such as p-values, Akaike Information Criterion (AIC), or Bayesian Information Criterion (BIC). In contrast, regularization methods such as lasso and elastic net incorporate penalties into the loss function to control model complexity. Lasso applies an $\ell_1$ penalty that can shrink coefficients exactly to zero, thereby performing variable selection, while elastic net combines $\ell_1$ and $\ell_2$ penalties to better handle correlated predictors. Despite their widespread use, the performance of these methods can vary depending on factors such as sample size, correlation structure among predictors, and the strength of the signal. In this simulation study, we systematically compare several variable selection techniques in linear regression under controlled settings. Because the true underlying model is known, simulation allows direct evaluation of each method’s ability to correctly identify relevant predictors, avoid selecting irrelevant variables, and accurately estimate regression coefficients. We focus on settings with 20 predictors, of which 5 have true associations with the outcome, and evaluate how performance varies across different sample sizes, correlation structures, and regularization choices.
+
+
+# Preliminary Methods
+We conducted a simulation study to evaluate the performance of several variable selection methods in linear regression. Data were generated from a Guassian linear model of the form $Y=X\beta + \epsilon$, where $X \in \mathbb{R}^{n \times 20}$ is a matrix of predictors and $\epsilon \sim N(0,\sigma^2)$. The true coefficient vector $\beta$ contained five nonzero coefficients corresponding to the first five predictors, with values (0.5/3,1/3,1.5/3,2/3,2.5/3), while the remaining fifteen coefficients were set to zero. Predictors were generated using the hdrm::gen_data() function with an exchangeable correlation structure, where all pairwise correlations were equal to $\rho$. We considered three correlation settings ($\rho = 0, 0.35, 0.7$) to represent independent, moderately correlated, and highly correlated predictors. Two sample sizes (n = 250 and n = 500) were examined, resulting in six simulation scenarios. For each scenario, 10,000 independent datasets were generated. We compared five variable selection approaches: backward selection based on p-values, backward selection using AIC, backward selection using BIC, lasso regression ($\alpha=1$), and elastic net regression ($\alpha=0.5$). For the penalized regression methods, the tuning parameter $\lambda$ was selected using 10-fold cross-validation, considering both the value that minimized the cross-validated error ($\lambda_{\text{min}}$) and the conservative one standard error rule ($\lambda_{\text{1se}}$). All models were fit without an intercept. After variable selection, the final model for each method was refit using ordinary least squares including only the selected predictors. From these refitted models, we extracted coefficient estimates, p-values, and 95% confidence intervals. Although this approach ignores uncertainty introduced by the selection process, it reflects common practice and allows us to assess the impact of model selection on subsequent inference. Performance was evaluated in terms of both selection and inference. Selection performance was assessed using the proportion of simulations in which each predictor was selected, allowing us to estimate true positive rates for the five relevant predictors and false positive rates for the fifteen noise predictors. Inference performance was evaluated among selected variables using bias of the estimated coefficients, coverage of 95% confidence intervals, and hypothesis testing metrics. Specifically, type I error was defined as the proportion of times noise variables were both selected and found to be statistically significant, while power was defined as the proportion of times true predictors were selected and statistically significant. All simulations were implemented in R using the hdrm, glmnet, and stats packages, with parallel computation used to improve efficiency.
