@@ -87,7 +87,7 @@ refit_extract <- function(sim_dat, selected_vars, method, n, rho, rep_id, true_b
 }
 
 #function for backward selection using F-test p-values
-select_backward_p <- function(sim_dat, p_thresh = 0.15) {
+select_backward_p <- function(sim_dat, p_thresh = 0.1) {
   #start with full no-intercept model
   current_vars <- x_vars
   while (length(current_vars) > 0) {
