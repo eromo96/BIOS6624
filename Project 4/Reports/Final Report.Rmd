@@ -1,5 +1,5 @@
 ---
-title: "Project4: Interim Data Analysis Plan"
+title: "Project4: Final Report"
 author: "Eduardo Romo"
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output:
