@@ -145,30 +145,44 @@ ggplot(heatmap_selection, aes(x = scenario, y = method, fill = value)) +
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
 
-#variable level type 1/type 2 error
-variable_error_summary <- final_results_df %>%
+#type ii error for true predictors
+type2_summary <- final_results_df %>%
+  filter(truly_active) %>%
   mutate(
-    covariate_group = case_when(
-      variable == "X1" ~ "X1",
-      variable == "X2" ~ "X2",
-      variable == "X3" ~ "X3",
-      variable == "X4" ~ "X4",
-      variable == "X5" ~ "X5",
-      variable %in% noise_vars ~ "X6-X20"
-    ),
-    error = case_when(
-      truly_active ~ !reject_null,
-      noise_variable ~ reject_null
-    ),
-    error_type = case_when(
-      truly_active ~ "Type 2 Error",
-      noise_variable ~ "Type 1 Error"
-    )
+    covariate_group = variable,
+    error = !(reject_null),
+    error_type = "Type 2 Error"
   ) %>%
   group_by(n, rho, method, covariate_group, error_type) %>%
   summarise(
     error_rate = round(mean(error, na.rm = TRUE), 4),
     .groups = "drop"
+  )
+
+#fmaily wise type i error
+type1_summary <- final_results_df %>%
+  filter(noise_variable) %>%
+  group_by(n, rho, method, rep_id) %>%
+  summarise(
+    error = max(reject_null, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  group_by(n, rho, method) %>%
+  summarise(
+    error_rate = round(mean(error), 4),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    covariate_group = "X6-X20",
+    error_type = "Type I Error"
+  )
+#combine type i and ii error summaries
+variable_error_summary <- bind_rows(
+  type2_summary,
+  type1_summary
+) %>%
+  mutate(
+    error_rate = round(error_rate, 4)
   )
 
 #pivot to wide format
@@ -224,3 +238,44 @@ bias_coverage_tab_display <- bias_coverage_mega_table %>%
     bias_X4, coverage_X4,
     bias_X5, coverage_X5
   )
+
+
+#selection summary table
+selection_summary <- final_results_df %>%
+  mutate(
+    covariate_group = case_when(
+      variable == "X1" ~ "X1",
+      variable == "X2" ~ "X2",
+      variable == "X3" ~ "X3",
+      variable == "X4" ~ "X4",
+      variable == "X5" ~ "X5",
+      variable %in% noise_vars ~ "X6-X20"
+    )
+  )
+#calc selection proportions
+selection_summary <- selection_summary %>%
+  group_by(n, rho, method, covariate_group) %>%
+  summarise(
+    selection_rate = mean(selected),
+    .groups = "drop"
+  )
+#pivot wide
+selection_table_wide <- selection_summary %>%
+  pivot_wider(
+    names_from = c(n, covariate_group),
+    values_from = selection_rate
+  ) %>%
+  arrange(rho, method)
+#format selection table so that it displays nicely
+selection_table_display <- selection_table_wide %>%
+  rename_with(~ gsub("250_", "n250_", .x)) %>%
+  rename_with(~ gsub("500_", "n500_", .x)) %>%
+  mutate(
+    rho = paste0("$\\rho = ", rho, "$")
+  ) %>%
+  select(
+    rho, method,
+    n250_X1, n250_X2, n250_X3, n250_X4, n250_X5, `n250_X6-X20`,
+    n500_X1, n500_X2, n500_X3, n500_X4, n500_X5, `n500_X6-X20`
+  )
+

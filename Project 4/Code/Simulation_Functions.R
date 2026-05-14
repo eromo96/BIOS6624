@@ -225,7 +225,7 @@ run_one_rep <- function(rep_id, n, rho, true_betas, p = 20, p1 = 5) {
   all_results <- list()
   
   # Backward p-value
-  selected <- select_backward_p(sim_dat, p_thresh = 0.15)
+  selected <- select_backward_p(sim_dat, p_thresh = 0.1)
   all_results[["backward_pvalue"]] <- refit_extract(
     sim_dat, selected, "backward_pvalue", n, rho, rep_id, true_betas
   )

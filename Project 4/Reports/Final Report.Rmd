@@ -88,30 +88,44 @@ heatmap_selection <- method_level_selection %>%
   )
 
 
-#variable level type 1/type 2 error
-variable_error_summary <- final_results_df %>%
+#type ii error for true predictors
+type2_summary <- final_results_df %>%
+  filter(truly_active) %>%
   mutate(
-    covariate_group = case_when(
-      variable == "X1" ~ "X1",
-      variable == "X2" ~ "X2",
-      variable == "X3" ~ "X3",
-      variable == "X4" ~ "X4",
-      variable == "X5" ~ "X5",
-      variable %in% noise_vars ~ "X6-X20"
-    ),
-    error = case_when(
-      truly_active ~ !reject_null,
-      noise_variable ~ reject_null
-    ),
-    error_type = case_when(
-      truly_active ~ "Type 2 Error",
-      noise_variable ~ "Type 1 Error"
-    )
+    covariate_group = variable,
+    error = !(reject_null),
+    error_type = "Type 2 Error"
   ) %>%
   group_by(n, rho, method, covariate_group, error_type) %>%
   summarise(
     error_rate = round(mean(error, na.rm = TRUE), 4),
     .groups = "drop"
+  )
+
+#fmaily wise type i error
+type1_summary <- final_results_df %>%
+  filter(noise_variable) %>%
+  group_by(n, rho, method, rep_id) %>%
+  summarise(
+    error = max(reject_null, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  group_by(n, rho, method) %>%
+  summarise(
+    error_rate = round(mean(error), 4),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    covariate_group = "X6-X20",
+    error_type = "Type I Error"
+  )
+#combine type i and ii error summaries
+variable_error_summary <- bind_rows(
+  type2_summary,
+  type1_summary
+) %>%
+  mutate(
+    error_rate = round(error_rate, 4)
   )
 
 #pivot to wide format
@@ -167,23 +181,82 @@ bias_coverage_tab_display <- bias_coverage_mega_table %>%
     bias_X4, coverage_X4,
     bias_X5, coverage_X5
   )
+
+#selection summary table
+selection_summary <- final_results_df %>%
+  mutate(
+    covariate_group = case_when(
+      variable == "X1" ~ "X1",
+      variable == "X2" ~ "X2",
+      variable == "X3" ~ "X3",
+      variable == "X4" ~ "X4",
+      variable == "X5" ~ "X5",
+      variable %in% noise_vars ~ "X6-X20"
+    )
+  )
+#calc selection proportions
+selection_summary <- selection_summary %>%
+  group_by(n, rho, method, covariate_group) %>%
+  summarise(
+    selection_rate = mean(selected),
+    .groups = "drop"
+  )
+#pivot wide
+selection_table_wide <- selection_summary %>%
+  pivot_wider(
+    names_from = c(n, covariate_group),
+    values_from = selection_rate
+  ) %>%
+  arrange(rho, method)
+#format selection table so that it displays nicely
+selection_table_display <- selection_table_wide %>%
+  rename_with(~ gsub("250_", "n250_", .x)) %>%
+  rename_with(~ gsub("500_", "n500_", .x)) %>%
+  mutate(
+    rho = paste0("$\\rho = ", rho, "$")
+  ) %>%
+  select(
+    rho, method,
+    n250_X1, n250_X2, n250_X3, n250_X4, n250_X5, `n250_X6-X20`,
+    n500_X1, n500_X2, n500_X3, n500_X4, n500_X5, `n500_X6-X20`
+  )
 ```
 
 # Introduction
-Linear regression is widely used to model the relationship between an outcome variable and a set of predictors. In moderate- to high-dimensional settings, variable selection becomes critical for accurately quantifying these relationships. Variable selection refers to identifying a subset of relevant predictors to include in a statistical model. This is important for both statisticians and collaborators, as including irrelevant variables can increase variance, lead to overfitting, and reduce interpretability, while excluding important variables can introduce bias and result in incorrect inference. A variety of variable selection methods have been developed, differing in both their procedures and performance. Classical approaches, such as backward selection, rely on stepwise regression techniques that begin with a full model and iteratively remove variables based on criteria such as p-values, Akaike Information Criterion (AIC), or Bayesian Information Criterion (BIC). In contrast, regularization methods such as lasso and elastic net incorporate penalties into the loss function to control model complexity. Lasso applies an $\ell_1$ penalty that can shrink coefficients exactly to zero, thereby performing variable selection, while elastic net combines $\ell_1$ and $\ell_2$ penalties to better handle correlated predictors. Despite their widespread use, the performance of these methods can vary depending on factors such as sample size, correlation structure among predictors, and the strength of the signal. In this simulation study, we systematically compare several variable selection techniques in linear regression under controlled settings. Because the true underlying model is known, simulation allows direct evaluation of each method’s ability to correctly identify relevant predictors, avoid selecting irrelevant variables, and accurately estimate regression coefficients. We focus on settings with 20 predictors, of which 5 have true associations with the outcome, and evaluate how performance varies across different sample sizes, correlation structures, and regularization choices.
+Linear regression is widely used to model the relationship between an outcome and a set of predictors. In moderate- to high-dimensional settings, variable selection becomes critical for accurately quantifying these relationships. Variable selection refers to identifying a subset of relevant predictors to include in a statistical model. Including irrelevant variables can increase variance, lead to overfitting, and reduce interpretability, while excluding important variables can introduce bias and result in incorrect inference. 
+
+A variety of variable selection methods have been developed, differing in both their procedures and performance. Classical approaches, such as backward selection, iteratively remove variables from a full model based on criteria such as p-values, Akaike Information Criterion (AIC), or Bayesian Information Criterion (BIC). In contrast, regularization methods such as lasso and elastic net incorporate penalties to control model complexity. Lasso applies an $\ell_1$ penalty that can shrink coefficients exactly to zero, while elastic net combines $\ell_1$ and $\ell_2$ penalties to better handle correlated predictors. The performance of these methods depends on factors such as sample size, correlation among predictors, and signal strength. 
+
+In this simulation study, we compare several variable selection techniques in linear regression under controlled settings. Because the true model is known, simulation allows direct evaluation of each method’s ability to identify relevant predictors, avoid selecting irrelevant variables, and accurately estimate regression coefficients. We consider settings with 20 predictors, of which 5 have true associations with the outcome, and evaluate performance across different sample sizes and correlation structures.
 
 
 # Methods
-We conducted a simulation study to evaluate the performance of several variable selection methods in linear regression. Data were generated from a Guassian linear model of the form $Y=X\beta + \epsilon$, where $X \in \mathbb{R}^{n \times 20}$ is a matrix of predictors and $\epsilon \sim N(0,\sigma^2)$. The true coefficient vector $\beta$ contained five nonzero coefficients corresponding to the first five predictors, with values (0.5/3,1/3,1.5/3,2/3,2.5/3), while the remaining fifteen coefficients were set to zero. Predictors were generated using the hdrm::gen_data() function with an exchangeable correlation structure, where all pairwise correlations were equal to $\rho$. We considered three correlation settings ($\rho = 0, 0.35, 0.7$) to represent independent, moderately correlated, and highly correlated predictors. Two sample sizes (n = 250 and n = 500) were examined, resulting in six simulation scenarios. For each scenario, 10,000 independent datasets were generated. We compared five variable selection approaches: backward selection based on p-values, backward selection using AIC, backward selection using BIC, lasso regression ($\alpha=1$), and elastic net regression ($\alpha=0.5$). For the penalized regression methods, the tuning parameter $\lambda$ was selected using 10-fold cross-validation, considering both the value that minimized the cross-validated error ($\lambda_{\text{min}}$) and the conservative one standard error rule ($\lambda_{\text{1se}}$). All models were fit without an intercept. After variable selection, the final model for each method was refit using ordinary least squares including only the selected predictors. From these refitted models, we extracted coefficient estimates, p-values, and 95% confidence intervals. Although this approach ignores uncertainty introduced by the selection process, it reflects common practice and allows us to assess the impact of model selection on subsequent inference. Performance was evaluated in terms of both selection and inference. Selection performance was assessed using the proportion of simulations in which each predictor was selected, allowing us to estimate true positive rates for the five relevant predictors and false positive rates for the fifteen noise predictors. Inference performance was evaluated among selected variables using bias of the estimated coefficients, coverage of 95% confidence intervals, and hypothesis testing metrics. Specifically, type I error was defined as the proportion of times noise variables were both selected and found to be statistically significant, while power was defined as the proportion of times true predictors were selected and statistically significant. All simulations were implemented in R using the hdrm, glmnet, and stats packages, with parallel computation used to improve efficiency.
+We conducted a simulation study to evaluate variable selection methods in linear regression. Analyses were implemented in R using the hdrm, glmnet, and stats packages, with parallel computation via furrr and future to improve computational efficiency. 
 
-```{r}
+Data were generated from a Guassian linear model $Y=X\beta + \epsilon$, where $X \in \mathbb{R}^{n \times 20}$ and $\epsilon \sim N(0,\sigma^2)$. The coefficient vector $\beta$ contained five nonzero values ($X1=0.5/3, X2=1/3,X3=1.5/3,X4=2/3,X5=2.5/3$), while the remaining fifteen coefficients were set to zero. Predictors were generated using hdrm::gen_data() with an exchangeable correlation structure with three correlation settings ($\rho = 0, 0.35, 0.7$) considered to represent independent, moderately correlated, and highly correlated predictors. Two sample sizes (n = 250, 500) were considered, resulting in six simulation scenarios. For each scenario, 10,000 datasets were generated to ensure stable estimation of performance metrics, particularly for quantities such as type I error and coverage probabilities, which can exhibit substantial variability in smaller simulation studies.
+
+We compared backward selection based on p-values, AIC, and BIC, along with lasso ($\alpha=1$), and elastic net ($\alpha=0.5$). For p-value-based backward selection, variables with p-values exceeding 0.10 were sequentially removed. This threshold was chosen to fall between the approximate p-value equivalents of AIC (~ 0.157) and BIC (~0.05), providing a compromise between less and more conservative selection criteria. Penalized regression methods were fit using glmnet, with tuning parameters selected via 10-fold cross-validation using both ($\lambda_{\text{min}}$) and ($\lambda_{\text{1se}}$). All models were fit without an intercept to align with the data generating mechanism in hdrm, where predictors are centered at zero. Including an intercept in this setting can introduce redundancy and affect variable selection behavior.
+
+After variable selection, models were refit using ordinary least squares with selected predictors. Coefficient estimates, p-values, and 95% confidence intervals were extracted. To avoid conditioning performance metrics on selection, all predictors were retained in the simulation output for every replication, with estimates for unselected variables recorded as missing.
+
+Selection performance was assessed using both aggregate and variable specific metrics. Aggregate performance was assessed using true positive rates (TPR) and false positive rates (FPR), defined as the proportion of true and noise predictors, respectively, selected within each replication and averaged across replications. Variable specific selection proportions were also calculated for each true predictor individually, while noise predictors were summarized collectively. Inference performance was evaluated using bias, empirical 95% confidence interval coverage, and error rates. Bias was defined as the average difference between estimated and true coefficients among selected true predictors, and coverage was defined as the proportion of 95% confidence intervals that contained the true parameter value. Type II error was evaluated separately for each true predictor and defined as the proportion of replications in which a predictor failed to be both selected and statistically significant. Type I error was defined using a family-wise approach as the proportion of replications in which at least one noise predictor (X6-X20) was both selected and statistically significant.
+
+All simulation procedures were implemented using custom functions to generate data, perform variable selection, and extract model outputs. A fixed random seed was used to ensure reproducibility. Parallel computation was used to reduce runtime while maintaining reproducibility through controlled seeding.
+
+
+# Results
+We evaluated seven variable selection methods across six simulation scenarios defined by sample size (n = 250, 500) and predictor correlation ($\rho = 0, 0.35, 0.7$). Aggregate selection performance is summarized in Figure 1, while Tables 1-3 present variable-level error rates, inference properties, and selection proportions. 
+
+Figure 1 demonstrates a clear tradeoff between TPR and FPR across methods. Penalized methods using $\lambda_{\text{min}}$ (LASSO Min and Elastic Net Min) achieved near perfect detection of true predictors ($\text{TPR} \approx 1.00$), but at the expense of substantially higher false positive rates ($\text{FPR} \approx 0.35-0.51$). Comparatively, BIC consistently produced the lowest FPR (typically < 0.03), though with reduced TPR, particularly in more settings with higher correlation. AIC- and p-value-based methods showed intermediate performance, balancing moderate TPR with moderate FPR. Elastic net with the one standard error rule ($\lambda_{\text{1SE}}$) also demonstrated a more balanced performance relative to its $\lambda_{\text{min}}$ counterpart, reducing false positives while maintaining high detection rates. Increasing predictor correlation generally increased FPR and reduced detection performance, while larger sample sizes modestly improved performance across methods.
+
+
+```{r, fig.cap= "True Positive and False Positive Selection Rates Heat Maps"}
 #heatmap for tpr/fpr
 ggplot(heatmap_selection, aes(x = scenario, y = method, fill = value)) +
   geom_tile(color = "white") +
   geom_text(aes(label = sprintf("%.2f", value)), size = 3) +
   facet_wrap(~ metric) +
   labs(
-    title = "True Positive and False Positive Selection Rates",
     x = "Scenario",
     y = "Selection Method",
     fill = "Proportion"
@@ -193,6 +266,11 @@ ggplot(heatmap_selection, aes(x = scenario, y = method, fill = value)) +
     axis.text.x = element_text(angle = 45, hjust = 1)
   )
 ```
+
+
+Table 3 presents variable specific selection proportions. Predictors with stronger signals (X3-X5) were selected almost universally across methods and scenarios, whereas selection of X1, which had the weakest signal, varied substantially. BIC demonstrated the lowest selection proportion for X1, particularly under high correlation, while penalized methods using $\lambda_{\text{min}}$ maintained substantially higher selection rates. Selection proportions for noise predictors reflected the FPR patterns observed in Figure 1, with penalized methods generally selecting more noise variables than conservative stepwise approaches.
+
+Table 1 summarizes type II error rates for true predictors and type I error rates for noise predictors. Type II error was concentrated around covariates with weak signals particularly X1, while X2-X5 were almost always correctly identified (type II error near zero). Consistent with its conservative behavior, BIC exhibited higher type II error rates, whereas LASSO Min and Elastic Net Min achieved lower type II error rates. Family-wise type I error rates differed substantially across methods. Conservative approaches such as BIC maintained lower type I error rates, while penalized methods using $\lambda_{\text{min}}$ frequently identified at least one noise predictor as statistically significant within a replication. Correlation among predictors generally increased type I error, while more conservative tuning choices using $\lambda_{\text{1SE}}$ reduced false discoveries.
 
 
 ```{r}
@@ -226,6 +304,9 @@ variable_error_tab_display %>%
     valign = "middle"
   )
 ```
+
+
+Table 2 summarizes bias and empirical 95% confidence interval coverage among selected true predictors. Bias was generally small in magnitude across methods and scenarios. Penalized regression methods showed slight negative bias consistent with shrinkage toward zero, while backward selection methods occasionally showed small positive bias. Coverage probabilities were generally close to the nominal 95% level for moderate correlation settings, but deviations were observed under high correlation ($\rho=0.7$), in some cases falling below 0.93. Larger sample sizes modestly improved coverage, although nominal levels were not consistently achieved. Overall, no single method uniformly outperformed others. Methods that prioritized detection of true predictors, such as LASSO Min and Elastic Net Min, obtained higher false positive rates and shrinkage bias, whereas more conservative approaches reduced false discoveries at the expense of missing weaker signals.
 
 
 ```{r}
@@ -265,4 +346,48 @@ bias_coverage_tab_display %>%
     valign = "middle"
   )
 ```
+
+
+
+```{r}
+selection_table_display %>%
+  kable(
+    format = "latex",
+    booktabs = TRUE,
+    escape = FALSE,
+    digits = 3,
+    caption = "Selection proportions for true predictors (X1--X5) and pooled noise predictors (X6--X20) across simulation scenarios.",
+    col.names = c(
+      "$\\rho$", "Method",
+      "$X_1$", "$X_2$", "$X_3$", "$X_4$", "$X_5$", "$X_6$--$X_{20}$",
+      "$X_1$", "$X_2$", "$X_3$", "$X_4$", "$X_5$", "$X_6$--$X_{20}$"
+    )
+  ) %>%
+  add_header_above(
+    c(
+      " " = 2,
+      "$n = 250$" = 6,
+      "$n = 500$" = 6
+    ),
+    escape = FALSE
+  ) %>%
+  kable_styling(
+    latex_options = c("hold_position", "scale_down"),
+    font_size = 8
+  ) %>%
+  collapse_rows(
+    columns = 1,
+    valign = "middle"
+  )
+```
+
+# Discussion
+This simulation study compared several commonly used variable selection methods under varying sample sizes and predictor correlation structures. Overall, the results demonstrated a clear tradeoff between aggressive variable detection and control of false discoveries. Penlaized regression methods using $\lambda_{\text{min}}$, particularly LASSO Min and Elastic Net Min, achieved the highest true positive rates and lowest type II error rates, even in highly correlated settings. However, this improved sensitivity came at the cost of substantially higher false positive and type I error rates, indicating a greater tendency to include irrelevant predictors. In contrast, BIC-based backward selection was considerably more conservative, producing the lowest false positive rates and strongest control of type I error, but frequently failing to detect weaker signals such as X1.
+
+These findings highlight that no single variable selection approach is universally optimal and that the preferred method depends on the primary goal of the anlaysis. Less conservative penalized apporaches may be preferable when maximizing detection of potentially relevant predictors is most important, whereas more conservative approaches such as BIC may be preferable when minimizing false discoveries or obtaining a more parisomnious model is the primary objective. Elastic Net 1SE demonstrated a more balanced tradeoff between sensitivity and specificity. Predictor correlation substantially affected performance across methods. As correlation increased, false positive rates and type I error generally increased while detection of weaker signals became more difficult. Larger sample sizes modestly improved performance, though they did not fully eliminate the tradeoff between identifying true predictors and controlling false discoveries. More broadly, these results emphasize the importance of collaboration between statisticians and subject matter experts when determining which predictors are most important to retain in a final model.
+
+Several limitations should be considered. The simulation scenarios were limited to Gaussian linear models with an exchangeable correlation structure and a fixed number of predictors. Performance may differ in higher-dimensional settings, alternative correlation structures, or non-Gaussian outcomes. Additionally, post-selection inference was performed by refitting ordinary least squares models without adjusting for selection uncertainty, which may have contributed to the observed deviations from nominal confidence interval coverage. Finally, only a limited set of tuning parameter choices and selection procedures were considered. Overall, this simulation study demonstrates the important balance between variable detection, false dicovery control, and inference quality. These findings suggest that the choice of variable selection procedure should be guided by the scientific goals of the analysis rather than relying on a single method in all settings.
+
+
+
 

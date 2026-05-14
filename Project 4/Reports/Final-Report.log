@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999994 (TeX Live 2022) (preloaded format=xelatex 2022.10.3)  7 MAY 2026 14:04
+This is XeTeX, Version 3.141592653-2.6-0.999994 (TeX Live 2022) (preloaded format=xelatex 2022.10.3)  13 MAY 2026 20:08
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -909,53 +909,55 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 File: mt-msb.cfg 2005/06/01 v1.0 microtype config. file: AMS symbols (b) (RS)
 )
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(1)/m/n' will be
-(Font)              scaled to size 8.4pt on input line 115.
+(Font)              scaled to size 8.4pt on input line 114.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(1)/m/n' will be
-(Font)              scaled to size 6.0pt on input line 115.
+(Font)              scaled to size 6.0pt on input line 114.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
-(Font)              scaled to size 12.0011pt on input line 115.
+(Font)              scaled to size 12.0011pt on input line 114.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
-(Font)              scaled to size 8.40076pt on input line 115.
+(Font)              scaled to size 8.40076pt on input line 114.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
-(Font)              scaled to size 6.00055pt on input line 115.
+(Font)              scaled to size 6.00055pt on input line 114.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(3)/m/n' will be
-(Font)              scaled to size 11.99872pt on input line 115.
+(Font)              scaled to size 11.99872pt on input line 114.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(3)/m/n' will be
-(Font)              scaled to size 8.3991pt on input line 115.
+(Font)              scaled to size 8.3991pt on input line 114.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(3)/m/n' will be
-(Font)              scaled to size 5.99936pt on input line 115.
+(Font)              scaled to size 5.99936pt on input line 114.
 [1
 
-] [2]
+] [2] [3]
 File: Final-Report_files/figure-latex/unnamed-chunk-1-1.pdf Graphic file (type 
 pdf)
 <use Final-Report_files/figure-latex/unnamed-chunk-1-1.pdf>
+[4] [5]
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(1)/m/n' will be
-(Font)              scaled to size 8.0pt on input line 232.
+(Font)              scaled to size 8.0pt on input line 308.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(1)/m/n' will be
-(Font)              scaled to size 5.0pt on input line 232.
+(Font)              scaled to size 5.0pt on input line 308.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
-(Font)              scaled to size 8.00073pt on input line 232.
+(Font)              scaled to size 8.00073pt on input line 308.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
-(Font)              scaled to size 5.00046pt on input line 232.
+(Font)              scaled to size 5.00046pt on input line 308.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(3)/m/n' will be
-(Font)              scaled to size 7.99915pt on input line 232.
+(Font)              scaled to size 7.99915pt on input line 308.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(3)/m/n' will be
-(Font)              scaled to size 4.99947pt on input line 232.
+(Font)              scaled to size 4.99947pt on input line 308.
+[6]
 
 LaTeX Warning: `!h' float specifier changed to `!ht'.
 
 
 LaTeX Warning: `!h' float specifier changed to `!ht'.
 
-[3] [4] [5] (./Final-Report.aux) ) 
+[7] [8] [9] [10] (./Final-Report.aux) ) 
 Here is how much of TeX's memory you used:
- 20169 strings out of 476179
- 371696 string characters out of 5809544
- 924891 words of memory out of 5000000
- 40601 multiletter control sequences out of 15000+600000
+ 20177 strings out of 476179
+ 371794 string characters out of 5809544
+ 931077 words of memory out of 5000000
+ 40609 multiletter control sequences out of 15000+600000
  477713 words of font info for 91 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
  86i,13n,121p,1009b,338s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
-Output written on Final-Report.pdf (5 pages).
+Output written on Final-Report.pdf (10 pages).
