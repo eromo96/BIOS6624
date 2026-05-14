@@ -239,15 +239,13 @@ We compared backward selection based on p-values, AIC, and BIC, along with lasso
 
 After variable selection, models were refit using ordinary least squares with selected predictors. Coefficient estimates, p-values, and 95% confidence intervals were extracted. To avoid conditioning performance metrics on selection, all predictors were retained in the simulation output for every replication, with estimates for unselected variables recorded as missing.
 
-Selection performance was assessed using both aggregate and variable specific metrics. Aggregate performance was assessed using true positive rates (TPR) and false positive rates (FPR), defined as the proportion of true and noise predictors, respectively, selected within each replication and averaged across replications. Variable specific selection proportions were also calculated for each true predictor individually, while noise predictors were summarized collectively. Inference performance was evaluated using bias, empirical 95% confidence interval coverage, and error rates. Bias was defined as the average difference between estimated and true coefficients among selected true predictors, and coverage was defined as the proportion of 95% confidence intervals that contained the true parameter value. Type II error was evaluated separately for each true predictor and defined as the proportion of replications in which a predictor failed to be both selected and statistically significant. Type I error was defined using a family-wise approach as the proportion of replications in which at least one noise predictor (X6-X20) was both selected and statistically significant.
+Selection performance was assessed using both aggregate and variable specific metrics. Aggregate performance was assessed using true positive rates (TPR) and false positive rates (FPR), defined as the proportion of true and noise predictors, respectively, selected within each replication and averaged across replications. Variable specific selection proportions were also calculated for each true predictor individually, while noise predictors were summarized collectively. Inference performance was evaluated using bias, empirical 95% confidence interval coverage, and error rates. Bias was defined as the average difference between estimated and true coefficients among selected true predictors, and coverage was defined as the proportion of 95% confidence intervals that contained the true parameter value. Type II error was evaluated separately for each true predictor and defined as the proportion of replications in which a predictor failed to be both selected and statistically significant. Type I error was defined using a family-wise approach as the proportion of replications in which at least one noise predictor (X6-X20) was both selected and statistically significant. This definition was chosen to better reflect the overall probability of making at least one false discovery within a fitted model rather than evaluating discoveries on a per-variable basis.
 
 All simulation procedures were implemented using custom functions to generate data, perform variable selection, and extract model outputs. A fixed random seed was used to ensure reproducibility. Parallel computation was used to reduce runtime while maintaining reproducibility through controlled seeding.
 
 
 # Results
 We evaluated seven variable selection methods across six simulation scenarios defined by sample size (n = 250, 500) and predictor correlation ($\rho = 0, 0.35, 0.7$). Aggregate selection performance is summarized in Figure 1, while Tables 1-3 present variable-level error rates, inference properties, and selection proportions. 
-
-Figure 1 demonstrates a clear tradeoff between TPR and FPR across methods. Penalized methods using $\lambda_{\text{min}}$ (LASSO Min and Elastic Net Min) achieved near perfect detection of true predictors ($\text{TPR} \approx 1.00$), but at the expense of substantially higher false positive rates ($\text{FPR} \approx 0.35-0.51$). Comparatively, BIC consistently produced the lowest FPR (typically < 0.03), though with reduced TPR, particularly in more settings with higher correlation. AIC- and p-value-based methods showed intermediate performance, balancing moderate TPR with moderate FPR. Elastic net with the one standard error rule ($\lambda_{\text{1SE}}$) also demonstrated a more balanced performance relative to its $\lambda_{\text{min}}$ counterpart, reducing false positives while maintaining high detection rates. Increasing predictor correlation generally increased FPR and reduced detection performance, while larger sample sizes modestly improved performance across methods.
 
 
 ```{r, fig.cap= "True Positive and False Positive Selection Rates Heat Maps"}
@@ -268,9 +266,44 @@ ggplot(heatmap_selection, aes(x = scenario, y = method, fill = value)) +
 ```
 
 
-Table 3 presents variable specific selection proportions. Predictors with stronger signals (X3-X5) were selected almost universally across methods and scenarios, whereas selection of X1, which had the weakest signal, varied substantially. BIC demonstrated the lowest selection proportion for X1, particularly under high correlation, while penalized methods using $\lambda_{\text{min}}$ maintained substantially higher selection rates. Selection proportions for noise predictors reflected the FPR patterns observed in Figure 1, with penalized methods generally selecting more noise variables than conservative stepwise approaches.
+Figure 1 demonstrates a clear tradeoff between TPR and FPR across methods. Penalized methods using $\lambda_{\text{min}}$ (LASSO Min and Elastic Net Min) achieved near perfect detection of true predictors ($\text{TPR} \approx 1.00$), but at the expense of substantially higher false positive rates ($\text{FPR} \approx 0.35-0.51$). Comparatively, BIC consistently produced the lowest FPR (typically < 0.03), though with reduced TPR, particularly in more settings with higher correlation. AIC- and p-value-based methods showed intermediate performance, balancing moderate TPR with moderate FPR. Elastic net with the one standard error rule ($\lambda_{\text{1SE}}$) also demonstrated a more balanced performance relative to its $\lambda_{\text{min}}$ counterpart, reducing false positives while maintaining high detection rates. Increasing predictor correlation generally increased FPR and reduced detection performance, while larger sample sizes modestly improved performance across methods.
 
-Table 1 summarizes type II error rates for true predictors and type I error rates for noise predictors. Type II error was concentrated around covariates with weak signals particularly X1, while X2-X5 were almost always correctly identified (type II error near zero). Consistent with its conservative behavior, BIC exhibited higher type II error rates, whereas LASSO Min and Elastic Net Min achieved lower type II error rates. Family-wise type I error rates differed substantially across methods. Conservative approaches such as BIC maintained lower type I error rates, while penalized methods using $\lambda_{\text{min}}$ frequently identified at least one noise predictor as statistically significant within a replication. Correlation among predictors generally increased type I error, while more conservative tuning choices using $\lambda_{\text{1SE}}$ reduced false discoveries.
+Table 1 presents variable specific selection proportions. Predictors with stronger signals (X3-X5) were selected almost universally across methods and scenarios, whereas selection of X1, which had the weakest signal, varied substantially. BIC demonstrated the lowest selection proportion for X1, particularly under high correlation, while penalized methods using $\lambda_{\text{min}}$ maintained substantially higher selection rates. Selection proportions for noise predictors reflected the FPR patterns observed in Figure 1, with penalized methods generally selecting more noise variables than conservative stepwise approaches.
+
+
+```{r}
+selection_table_display %>%
+  kable(
+    format = "latex",
+    booktabs = TRUE,
+    escape = FALSE,
+    digits = 3,
+    caption = "Selection proportions for true predictors (X1--X5) and pooled noise predictors (X6--X20) across simulation scenarios.",
+    col.names = c(
+      "$\\rho$", "Method",
+      "$X_1$", "$X_2$", "$X_3$", "$X_4$", "$X_5$", "$X_6$--$X_{20}$",
+      "$X_1$", "$X_2$", "$X_3$", "$X_4$", "$X_5$", "$X_6$--$X_{20}$"
+    )
+  ) %>%
+  add_header_above(
+    c(
+      " " = 2,
+      "$n = 250$" = 6,
+      "$n = 500$" = 6
+    ),
+    escape = FALSE
+  ) %>%
+  kable_styling(
+    latex_options = c("hold_position", "scale_down"),
+    font_size = 8
+  ) %>%
+  collapse_rows(
+    columns = 1,
+    valign = "middle"
+  )
+```
+
+Table 2 summarizes type II error rates for true predictors and type I error rates for noise predictors. Type II error was concentrated around covariates with weak signals particularly X1, while X2-X5 were almost always correctly identified (type II error near zero). Consistent with its conservative behavior, BIC exhibited higher type II error rates, whereas LASSO Min and Elastic Net Min achieved lower type II error rates. Family-wise type I error rates differed substantially across methods. Conservative approaches such as BIC maintained lower type I error rates, while penalized methods using $\lambda_{\text{min}}$ frequently identified at least one noise predictor as statistically significant within a replication. Correlation among predictors generally increased type I error, while more conservative tuning choices using $\lambda_{\text{1SE}}$ reduced false discoveries.
 
 
 ```{r}
@@ -306,7 +339,7 @@ variable_error_tab_display %>%
 ```
 
 
-Table 2 summarizes bias and empirical 95% confidence interval coverage among selected true predictors. Bias was generally small in magnitude across methods and scenarios. Penalized regression methods showed slight negative bias consistent with shrinkage toward zero, while backward selection methods occasionally showed small positive bias. Coverage probabilities were generally close to the nominal 95% level for moderate correlation settings, but deviations were observed under high correlation ($\rho=0.7$), in some cases falling below 0.93. Larger sample sizes modestly improved coverage, although nominal levels were not consistently achieved. Overall, no single method uniformly outperformed others. Methods that prioritized detection of true predictors, such as LASSO Min and Elastic Net Min, obtained higher false positive rates and shrinkage bias, whereas more conservative approaches reduced false discoveries at the expense of missing weaker signals.
+Table 3 summarizes bias and empirical 95% confidence interval coverage among selected true predictors. Bias was generally small in magnitude across methods and scenarios. Penalized regression methods showed slight negative bias consistent with shrinkage toward zero, while backward selection methods occasionally showed small positive bias. Coverage probabilities were generally close to the nominal 95% level for moderate correlation settings, but deviations were observed under high correlation ($\rho=0.7$), in some cases falling below 0.93. Larger sample sizes modestly improved coverage, although nominal levels were not consistently achieved. Overall, no single method uniformly outperformed others. Methods that prioritized detection of true predictors, such as LASSO Min and Elastic Net Min, obtained higher false positive rates and shrinkage bias, whereas more conservative approaches reduced false discoveries at the expense of missing weaker signals.
 
 
 ```{r}
@@ -349,38 +382,6 @@ bias_coverage_tab_display %>%
 
 
 
-```{r}
-selection_table_display %>%
-  kable(
-    format = "latex",
-    booktabs = TRUE,
-    escape = FALSE,
-    digits = 3,
-    caption = "Selection proportions for true predictors (X1--X5) and pooled noise predictors (X6--X20) across simulation scenarios.",
-    col.names = c(
-      "$\\rho$", "Method",
-      "$X_1$", "$X_2$", "$X_3$", "$X_4$", "$X_5$", "$X_6$--$X_{20}$",
-      "$X_1$", "$X_2$", "$X_3$", "$X_4$", "$X_5$", "$X_6$--$X_{20}$"
-    )
-  ) %>%
-  add_header_above(
-    c(
-      " " = 2,
-      "$n = 250$" = 6,
-      "$n = 500$" = 6
-    ),
-    escape = FALSE
-  ) %>%
-  kable_styling(
-    latex_options = c("hold_position", "scale_down"),
-    font_size = 8
-  ) %>%
-  collapse_rows(
-    columns = 1,
-    valign = "middle"
-  )
-```
-
 # Discussion
 This simulation study compared several commonly used variable selection methods under varying sample sizes and predictor correlation structures. Overall, the results demonstrated a clear tradeoff between aggressive variable detection and control of false discoveries. Penlaized regression methods using $\lambda_{\text{min}}$, particularly LASSO Min and Elastic Net Min, achieved the highest true positive rates and lowest type II error rates, even in highly correlated settings. However, this improved sensitivity came at the cost of substantially higher false positive and type I error rates, indicating a greater tendency to include irrelevant predictors. In contrast, BIC-based backward selection was considerably more conservative, producing the lowest false positive rates and strongest control of type I error, but frequently failing to detect weaker signals such as X1.
 
@@ -390,4 +391,8 @@ Several limitations should be considered. The simulation scenarios were limited 
 
 
 
+\newpage
+# Reproducible Research Information
+https://github.com/eromo96/BIOS6624.git
 
+Simulation Functions Location: /Users/eduardo/Eduardo/UColorado PhD Bios/Spring 26/BIOS6624 Advanced Statistical Methods/BIOS6624/Project4/Code
