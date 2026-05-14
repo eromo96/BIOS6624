@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999994 (TeX Live 2022) (preloaded format=xelatex 2022.10.3)  13 MAY 2026 20:08
+This is XeTeX, Version 3.141592653-2.6-0.999994 (TeX Live 2022) (preloaded format=xelatex 2022.10.3)  13 MAY 2026 21:10
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -932,17 +932,17 @@ pdf)
 <use Final-Report_files/figure-latex/unnamed-chunk-1-1.pdf>
 [4] [5]
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(1)/m/n' will be
-(Font)              scaled to size 8.0pt on input line 308.
+(Font)              scaled to size 8.0pt on input line 310.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(1)/m/n' will be
-(Font)              scaled to size 5.0pt on input line 308.
+(Font)              scaled to size 5.0pt on input line 310.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
-(Font)              scaled to size 8.00073pt on input line 308.
+(Font)              scaled to size 8.00073pt on input line 310.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
-(Font)              scaled to size 5.00046pt on input line 308.
+(Font)              scaled to size 5.00046pt on input line 310.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(3)/m/n' will be
-(Font)              scaled to size 7.99915pt on input line 308.
+(Font)              scaled to size 7.99915pt on input line 310.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(3)/m/n' will be
-(Font)              scaled to size 4.99947pt on input line 308.
+(Font)              scaled to size 4.99947pt on input line 310.
 [6]
 
 LaTeX Warning: `!h' float specifier changed to `!ht'.
